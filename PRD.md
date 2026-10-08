@@ -3,7 +3,18 @@
 **Personal log.** Written while probing someone else's repository to work out
 its structure and how to actually run it. Everything below is a record of what
 was tested on this machine, what worked, what failed, and what was too slow to
-finish. Date: 2026-10-08.
+finish.
+
+This document now has two parts, written on two different machines:
+
+| part | machine | date | scope |
+|---|---|---|---|
+| **Part I** (§0–§9) | Windows 11, conda `workspace`, CPU-only torch | 2026-10-08 | repository reconnaissance and synthetic smoke runs; **no MadGraph** — that was the blocker |
+| **Part II** (§10–§17) | CERN Linux node, EOS home, dedicated `python3.11` venv | 2026-10-08 → 2026-10-09 | MadGraph 3.6.7 installed and working; **the scattering results are now reproducible end to end** |
+
+Part I's conclusions about the *code* all still hold. Its central blocker — no
+MadGraph — is **resolved in Part II**. Read Part II first if you are here for
+the physics results.
 
 ---
 
@@ -11,13 +22,27 @@ finish. Date: 2026-10-08.
 
 A public GitHub repo, **not** the local user's own work:
 
-- remote: `https://github.com/XuZhaozhong-1/conditional-nf-integration.git`
+- primary remote (as of Part II): `https://github.com/dlai211/conditional-nf-integration.git`
+- mirror seen in Part I: `https://github.com/XuZhaozhong-1/conditional-nf-integration.git`
 - sole author: **Zhaozhong Xu** `<zhaozhong@…sdcc.bnl.gov>` (Brookhaven National
   Laboratory)
 - commits: 2026-09-20 → 2026-09-25 (8 commits, branch `main`)
 - working tree was clean on clone except for one uncommitted change
   (`experiments/run_adaptive_integrand_structure_search.py`, +5 lines adding a
   `sys.path` shim — not mine, left untouched)
+
+**Part II update on provenance.** The two remotes are the *same project*, not
+forks with divergent work: their histories share all 8 Part-I commits
+(`3f795a0`…`3db0a2b`). `dlai211` is strictly ahead — one extra commit,
+`4fdb861 "Initial commit to personal repo"`, which **adds `PRD.md` and
+`Intro.md` and commits the `sys.path` shim** that Part I had found as an
+uncommitted working-tree change. So the Part-I checkout was simply one commit
+behind the author's personal remote. The local checkout was re-pointed at
+`dlai211` and fast-forwarded `3db0a2b → 4fdb861`; nothing was discarded and the
+tree is clean apart from one pre-existing untracked `.asetup.save`.
+
+Everything in Part I was measured at `3db0a2b`; everything in Part II at
+`4fdb861`.
 
 Since this is someone else's published work, I have tried to keep the checkout
 pristine: everything I generated lives in the gitignored `results/` tree, and
@@ -580,6 +605,10 @@ there is no flag for it.
 
 ### 6.3 All MadGraph-dependent experiments — MG5 not installed
 
+> ✅ **RESOLVED in Part II (§11–§14).** MG5 3.6.7 is now installed and the
+> gg→t̄t scattering pipeline has been run end to end, reproducing the published
+> integrals. The section below is kept as the Part-I record of the blocker.
+
 **Verified.** No MadGraph on this machine:
 
 - `which mg5_aMC` → not found; no `MADGRAPH_PATH` or similar env var set.
@@ -723,3 +752,460 @@ These don't block anything but they cost time if you don't know them:
 3. Add a `requirements.txt` pinning numpy<2 for the torch 2.3 combination.
 4. Re-run `tests/` and `run_copula_bin_sweep.py --smoke` after any further env
    change — they are the two fastest health checks.
+
+---
+---
+
+# Part II — Linux / CERN EOS
+
+*MadGraph installed, scattering pipeline reproduced*
+
+**Date: 2026-10-08 → 2026-10-09.** Different machine from Part I: a CERN
+lxplus-style Linux node, home on EOS, no usable conda, no GPU. Everything
+below is a record of what was actually run.
+
+## 10. Headline
+
+Part I's blocker §6.3 is closed. **MadGraph5_aMC@NLO 3.6.7 is installed and
+the `gg → t t̄` scattering pipeline runs end to end**: generate → compile →
+train a conditional NF → validate at held-out energies against independent
+Sobol integration.
+
+The published numbers are not just qualitatively reproduced — the **Sobol
+column of `results_public/gg_ttbar_validation/summary.csv` is reproduced
+bit-for-bit**, and a smoke-budget NF lands within ~1–2% of the published ESS at
+four of five held-out energies.
+
+| E [GeV] | NF (my smoke model) [pb] | Sobol (mine) [pb] | Sobol (published) | ESS/N | pull |
+|---:|---:|---:|---:|---:|---:|
+| 400 | 12.841555 ± 0.0085 | 12.844943 | 12.844943 | 0.820 | −0.40 |
+| 650 | 16.914743 ± 0.0033 | 16.916571 | 16.916571 | 0.981 | −0.55 |
+| 1000 | 11.36891 ± 0.0030 | 11.368139 | 11.368139 | 0.967 | +0.26 |
+| 1500 | 6.8589956 ± 0.0022 | 6.8603675 | 6.8603675 | 0.952 | −0.63 |
+| 1950 | 4.7763929 ± 0.0013 | 4.7760299 | 4.7760299 | 0.965 | +0.28 |
+
+Every Sobol value matches the committed CSV to all printed digits
+(relative difference `0.00e+00`). All five NF–Sobol pulls are below 0.7σ.
+
+Two caveats, stated plainly: the NF here got only the **`--speed-profile smoke`
+budget** (300 KL steps), so its 400 GeV ESS of 0.820 is well below the
+published 0.998 — that is a training-budget effect, not a method failure. And
+this is the 2-D control process; the 5-D/8-D/20-D processes were **not** built
+in this session (see §16).
+
+## 11. Environment — and one large surprise
+
+### 11.1 What was available
+
+| item | state on arrival |
+|---|---|
+| system `python3` | 3.9.25 — too old; MG5 3.6.7 has dropped ≤3.9 and the repo needs a modern torch |
+| conda | present but **broken** — the prefix had been moved, so every `bin/` shebang pointed at a nonexistent `/eos/user/j/jlai/miniconda3/bin/python` |
+| `/eos/home-j` (i.e. `/eos/user/j/jlai`) | **FUSE** mount |
+| GPU | none |
+
+The conda prefix still contained a working `python3.11` binary when invoked by
+absolute path, so the environment was built from that rather than reinstalling
+conda.
+
+### 11.2 The environment actually used
+
+```bash
+/eos/user/j/jlai/Miniconda/miniconda3/bin/python3.11 -m venv /eos/user/j/jlai/mango/venv
+```
+
+| package | version |
+|---|---|
+| python | 3.11.5 |
+| numpy | 1.26.4 |
+| torch | **2.14.1+cpu** |
+| scipy | 1.17.1 |
+| pandas | 3.0.6 |
+| matplotlib | 3.11.2 |
+| vegas | 6.4.1 |
+| pytest | 9.1.1 |
+| gvar | 13.1.10 |
+
+**Correction to Part I §3.** The `numpy<2` pin is *not* a general requirement of
+this repository — it is a requirement of **torch 2.3 specifically**, which was
+the build Part I had. `torch 2.14.1+cpu` works correctly with NumPy 2 as well;
+the bridge was verified in both directions
+(`torch.from_numpy` and `Tensor.numpy`). The pin is harmless and is kept here
+only for exactness with the published environment.
+
+### 11.3 The EOS FUSE penalty — measure this before you plan any install
+
+The single most important operational fact on this machine: **EOS home is a
+FUSE mount and is catastrophically slow at creating small files.**
+
+Same loop, 300 tiny files, `echo x > f$i.txt`:
+
+| filesystem | time | rate |
+|---|---:|---:|
+| `/eos/user/j/jlai/mango` (FUSE) | 35.6 s | **~8.4 files/s** |
+| `/tmp` (local ext4) | 0.023 s | ~13 000 files/s |
+
+That is a ~1500× penalty, and it is **latency-serialised, not bandwidth-bound**:
+running the same 300 creates across 16 parallel processes only improved it to
+24.0 s (~12.5 files/s). Meanwhile a single 100 MB sequential write runs at
+**358 MB/s**. So big files are fine; *many* files are the problem.
+
+Consequences, all of which were felt in this session:
+
+- A `pip install --upgrade pip` (≈1000 files) took **~10 minutes**.
+- Extracting the 31 MB MG5 tarball (~5900 files) took **~7 minutes**.
+- Installing torch (~5000 files) took **~15 minutes**.
+- Anything that builds a MadGraph process tree or a virtualenv on EOS is a
+  coffee break, not a second. Budget accordingly, or build on local disk and
+  copy.
+
+### 11.4 Two self-inflicted wounds worth recording
+
+**(a) Concurrent pip runs silently corrupt a venv.** Two `pip install` jobs
+were accidentally left running against the same prefix. The visible symptom was
+misleading — `ImportError: Error importing numpy: ... No module named
+'numpy.core'` — because one pip was replacing `numpy` while another was
+importing it. A second casualty was a mixed-version `_pytest/` tree that made
+every `pytest` invocation die with
+`AttributeError: module 'py' has no attribute 'path'` until pytest was
+force-reinstalled. **Never run two pips into one prefix.**
+
+**(b) `py.py` in the working directory breaks `pytest`.** After a MadGraph run,
+`pytest` failed from the repository root with:
+
+```
+_pytest/compat.py:32: LEGACY_PATH = py.path. local
+AttributeError: module 'py' has no attribute 'path'
+```
+
+The cause is not pytest. PLY — via MadGraph's ALOHA code generator
+(`MG5_aMC_v3_6_7/aloha/aloha_parsers.py`) — writes a generated LALR parser
+table named **`py.py` into the current working directory**. Python's `sys.path`
+puts the CWD first, so this file shadows the real `py` shim that pytest 9 ships
+and pytest can no longer import. Running `pytest` from any other directory
+works fine. Delete the stray `py.py` (or run the MadGraph step from elsewhere).
+MadGraph also drops `nsqso_born.inc` and `param.log` in the CWD — both harmless
+and both invisible to `git status` (`param.log` is gitignored; the others are
+untracked).
+
+## 12. Installing MadGraph
+
+MG5 3.6.7 (build date 2026-01-05) was chosen deliberately: it is the version
+Part I found the author had downloaded, so it matches whatever produced the
+published results.
+
+```bash
+cd /eos/user/j/jlai/mango
+curl -sLO "https://launchpad.net/mg5amcnlo/3.0/3.6.x/+download/MG5_aMC_v3.6.7.tar.gz"
+tar xzf MG5_aMC_v3.6.7.tar.gz          # ~7 min on EOS, ~5900 files
+```
+
+MG5 ships `bin/mg5_aMC` with a `#!/usr/bin/env python3` shebang, which here
+resolves to the too-old system python 3.9. Rather than edit the upstream install
+or depend on `PATH` ordering, a two-line wrapper was created:
+
+```sh
+# /eos/user/j/jlai/mango/bin/mg5_aMC
+#!/bin/sh
+exec /eos/user/j/jlai/mango/venv/bin/python \
+     /eos/user/j/jlai/mango/MG5_aMC_v3_6_7/bin/mg5_aMC "$@"
+```
+
+This is what gets passed as `--mg5`; the repo's `resolve_executable()` accepts a
+plain file path, so no repo code needed changing.
+
+**Optional-tool warnings are expected and harmless.** On startup MG5 reports
+that it cannot find `fastjet-config`, `eMELA-config` or `lhapdf-config`. None
+are needed for LO *partonic* matrix elements with a fixed α_s and no PDFs —
+which is exactly what this repository does. The `Checking if MG5 is up-to-date
+... failed to connect server` line is also harmless (the update check has no
+egress here).
+
+## 13. Generating and compiling the standalone
+
+```bash
+cd /eos/user/j/jlai/mango/conditional-nf-integration
+PYTHONPATH=$PWD /eos/user/j/jlai/mango/venv/bin/python \
+    experiments/setup_madgraph_process.py \
+    --config configs/processes/gg_ttbar.json \
+    --mg5 /eos/user/j/jlai/mango/bin/mg5_aMC
+```
+
+MG5 correctly reads `g g > t t~ @1` as **one subprocess, 3 diagrams**, and
+creates `SubProcesses/P1_gg_ttx/`. The `@1` diagram filter is what keeps this a
+single subprocess directory, which matters: `MadGraphMatrixElement` raises
+`RuntimeError` if a spec resolves to more than one `P*` directory.
+
+**Compilation detail worth knowing.** `compile_libraries()` tries the combined
+`make allmatrix2py.so` target first. On this MG5 3.6.7 build that target is
+**unavailable**, so the documented fallback runs and builds
+`make matrix2py.so` per process directory instead — printing
+`Combined allmatrix2py target is unavailable; trying per-process wrappers.`
+That fallback is the path that actually works, and it happens to produce
+exactly the layout the loader wants:
+
+```
+generated/gg_ttbar_standalone/SubProcesses/P1_gg_ttx/
+    matrix2py.cpython-311-x86_64-linux-gnu.so     <- versioned, preferred
+    matrix2py.so
+```
+
+`MadGraphMatrixElement` globs `P*/matrix2py*.so` and prefers the `cpython-`
+versioned one, so the two coexist without ambiguity.
+
+## 14. The blocker nobody had hit: MadGraph initialisation is CWD-sensitive
+
+This is the most important finding of Part II, and it cost the most time.
+
+### Symptom
+
+Every attempt to load the matrix element **died silently**:
+
+```
+$ python experiments/validate_madgraph_process_integrand.py --config configs/processes/gg_ttbar.json
+ Warning: file ident_card.dat not found in the parent directories!(lha_read)
+$ echo $?
+0
+```
+
+Exit status **0**. No traceback, no error, no output at all past the warning —
+not even the prints that sit *after* the failing call. The generated library
+was present and importable; `import matrix2py` succeeded and exposed
+`py_m0_get_value`, `py_m0_smatrix`, `py_m0_smatrixhel`,
+`py_m0_initialisemodel` exactly as expected.
+
+### Cause
+
+`Source/MODEL/lha_read.f` resolves the auxiliary Les-Houches files **relative to
+the current working directory**, not relative to the parameter card that was
+passed in. For any filename containing `_card` it prepends `./Cards/` and then
+walks up to five parent levels (`../Cards/`, `../../Cards/`, …). If
+`ident_card.dat` is still not found it prints the warning and executes a
+Fortran `stop`:
+
+```fortran
+40      tempname='../'//tempname
+        if (i.eq.5)then
+           write(*,*) 'Warning: file ',filename,
+     &                           ' not found in the parent directories!(lha_read)'
+           stop
+        endif
+```
+
+Fortran `stop` terminates the process with **exit status 0**. That is what made
+this so hard to see: the failure is perfectly disguised as success. A shell that
+checks `$?`, or a pipeline whose exit status comes from its last stage, will
+report a clean run.
+
+### Fix
+
+**Run the MadGraph-dependent scripts with the working directory set to the
+generated standalone directory** (or any directory from which `Cards/` is
+reachable), because `Cards/ident_card.dat` lives there:
+
+```bash
+cd generated/gg_ttbar_standalone
+PYTHONPATH=$REPO python $REPO/experiments/validate_madgraph_process_integrand.py \
+    --config $REPO/configs/processes/gg_ttbar.json --points 500
+```
+
+With that one change the same command succeeds immediately:
+
+```
+CONFIGURED MADGRAPH INTEGRAND VALIDATION
+process                   = gg_ttbar
+dimension                 = 2
+max_momentum_residual     = 2.27373675443e-13
+max_mass_shell_residual   = 3.49245965481e-10
+minimum_jacobian          = 0.0115863199095
+finite_fraction           = 1
+finite log-integrand frac = 1
+positive integrand frac   = 1
+throughput points/s       = 47203.771
+```
+
+Four-momentum conservation to 2.3e-13, mass shells to 3.5e-10, a strictly
+positive Jacobian, a fully finite integrand, and **47 000 matrix-element
+evaluations per second** on one CPU core.
+
+### Why this matters beyond one command
+
+This collides head-on with the repository's own documented rule (§8.1 of
+Part I): *"all drivers write to relative paths (`results/...`), so always run
+from the repo root."* For every MadGraph-dependent driver, **that advice is
+wrong** — running from the repo root is precisely what makes the matrix element
+initialize to a silent `stop`.
+
+The workaround used here is to keep the CWD inside the standalone directory and
+pass **absolute** paths for everything else (`--config`, `--checkpoint`,
+`--output`). Do not "fix" this by symlinking a single `Cards/` into the repo
+root: each process has its own `Cards/`, so such a link is only ever correct for
+one process at a time. A cleaner repair — not attempted here, since it would
+mean editing the author's code — would be for `setup_madgraph_process.py` to
+`chdir` into the standalone directory for the duration of the initialise call.
+
+## 15. Results
+
+### 15.1 Repo test suite
+
+```bash
+PYTHONPATH=$PWD python -m pytest tests/
+# 12 passed in 12.67s
+```
+
+Matches Part I's result (Part I saw 2.15 s on Windows; the difference is EOS
+FUSE and a loaded shared node, not the code).
+
+### 15.2 Published Sobol integrals reproduced exactly
+
+Using only the freshly built library, `power=18` (262 144 points), 8 scrambled
+replicates, seed 20260920 — the exact configuration in the published
+`config.json`:
+
+| E [GeV] | my Sobol [pb] | published [pb] | relative difference |
+|---:|---:|---:|---:|
+| 400 | 12.844943 | 12.844943 | `0.00e+00` |
+| 650 | 16.916571 | 16.916571 | `0.00e+00` |
+| 1000 | 11.368139 | 11.368139 | `0.00e+00` |
+| 1500 | 6.860368 | 6.860368 | `0.00e+00` |
+| 1950 | 4.776030 | 4.776030 | `0.00e+00` |
+
+Even the *per-replicate scatters* agree: 1.2e-14, 1.6e-11, 1.3e-13, 9.6e-9 and
+9.2e-8 pb against the committed 1.1788e-14, 1.5590e-11, 1.3422e-13, 9.5812e-9
+and 9.2386e-8 pb. This is a strong end-to-end check: matrix-element
+normalization, external-particle ordering, the phase-space map, the Jacobian,
+α_s, and the QMC protocol all match the authors' setup. It took ~29 s per
+energy.
+
+**A suspicion that turned out to be unfounded — worth recording.** The published
+Sobol *uncertainties* for this process are absurdly small: `stderr_pb ≈ 1e-14`
+on a 12.8 pb estimate, i.e. ~1e-15 relative. That looks like a bug (an error bar
+at machine precision is physically meaningless), and it was checked directly.
+
+It is **not** a bug. The Sobol replicates genuinely differ — different seed →
+different scrambled points, verified — yet they integrate to the same value to
+~15 digits. The explanation is that this is a **2-D integrand smooth enough for
+scrambled QMC to be essentially exact** at 2^18 points. The tiny scatter is real
+floating-point residue, not a mis-computed error. The reproduction above
+confirms it independently, since the same 1e-14-scale scatters reappear from a
+completely separate build. The lesson is the one Part I already applied: the
+Sobol error bar for this process must not be read as a meaningful Monte Carlo
+uncertainty — the NF–Sobol pulls are dominated entirely by the NF error.
+
+### 15.3 Training on the real process
+
+```bash
+cd generated/gg_ttbar_standalone
+PYTHONPATH=$REPO python $REPO/experiments/run_madgraph_process_conditional_copula.py \
+    --config $REPO/configs/processes/gg_ttbar.json \
+    --speed-profile smoke \
+    --output $REPO/results/gg_ttbar_copula_smoke
+```
+
+Exit 0. The full annealing pipeline ran — weighted caches, marginal fit
+(early-stopped at step 100), bridge copula, then importance-weighted KL
+training — and wrote a checkpoint plus
+`madgraph_gg_ttbar_2_final_summary.csv`:
+
+| quantity | value |
+|---|---|
+| graph | `{0: [], 1: [0]}` (1 edge) |
+| ESS | 0.8072 |
+| Ihat | 2.6337e-08 |
+| logw std | 0.4935 |
+
+Note the marginal early-stop and the one-edge graph: for a 2-D two-body process
+the copula has almost nothing left to model after the marginals, which is the
+expected behaviour and a nice sanity signal that the pipeline is not
+overfitting noise.
+
+### 15.4 Held-out validation
+
+`validate_madgraph_process_integral.py` with the published defaults
+(`--sobol-power 18 --sobol-replicates 8 --nf-evals 500000`) against the smoke
+checkpoint. Results are the headline table in §10.
+
+Comparing the smoke model against the **published thorough model** for the same
+process:
+
+| E [GeV] | published ESS/N | my smoke ESS/N |
+|---:|---:|---:|
+| 400 | 0.9984 | 0.820 |
+| 650 | 0.9936 | 0.981 |
+| 1000 | 0.9887 | 0.967 |
+| 1500 | 0.9835 | 0.952 |
+| 1950 | 0.9808 | 0.965 |
+
+At 650–1950 GeV a 300-step smoke model already lands within **1–3%** of the
+fully-trained model's ESS. The 400 GeV point is the exception and has an
+obvious explanation: the training condition domain is
+`sqrt(s_hat) ∈ [360, 2000]` GeV, so 400 GeV sits almost on the lower edge, where
+the flow has seen the least data. Part I flagged the same edge behaviour in the
+synthetic runs.
+
+## 16. Revised "what I would do next"
+
+Part I's list, updated:
+
+1. ~~Decide whether to install MG5~~ — **done** (§12–§13). The remaining
+   MadGraph work is breadth, not feasibility:
+   - `gg_tth` (5-D, `configs/processes/gg_tth.json`) and `uu_ww_4l` (8-D) were
+     **not** built. They are the next two `setup_madgraph_process.py`
+     invocations and should go through the identical path.
+   - The 20-D fully-decayed ttH benchmark uses a different entry point
+     (`setup_madgraph_tth_benchmark.py --mode full`) whose process string
+     includes decays, plus `MadEvent`, which needs a real `lhapdf`/MadEvent
+     install. That is a genuinely separate project.
+2. Still open from Part I: the missing
+   `results/bayesian_delta_edge_selection/median_probability_graph.csv`
+   (Part I §6.1).
+3. A `requirements.txt` is still absent. If one is added, pin it to **this**
+   known-good set (§11.2) rather than to Part I's `numpy<2`+torch-2.3 pairing —
+   the numpy pin is a torch-version artifact, not a repo requirement.
+4. **Document the CWD requirement** (§14). This is the highest-value
+   documentation fix in the repository: as it stands, every MadGraph driver
+   fails with exit status 0 when run the way the repo tells you to run it.
+5. If MadGraph work is going to continue on EOS, generate the process trees on
+   local disk and copy the result, or accept minutes per build (§11.3).
+
+## 17. Quick reference (Part II)
+
+```bash
+export REPO=/eos/user/j/jlai/mango/conditional-nf-integration
+export PY=/eos/user/j/jlai/mango/venv/bin/python
+export MG5=/eos/user/j/jlai/mango/bin/mg5_aMC
+cd $REPO && export PYTHONPATH=$REPO
+
+# tests: no MadGraph needed, run from anywhere (NOT a dir containing py.py)
+$PY -m pytest tests/                                          # 12 passed, ~13 s
+
+# generate + compile a process (writes to generated/<name>_standalone)
+$PY experiments/setup_madgraph_process.py \
+    --config configs/processes/gg_ttbar.json --mg5 $MG5
+
+# ---- everything below MUST run with CWD inside the standalone dir ----
+cd $REPO/generated/gg_ttbar_standalone
+
+$PY $REPO/experiments/validate_madgraph_process_integrand.py \
+    --config $REPO/configs/processes/gg_ttbar.json --points 500
+
+$PY $REPO/experiments/run_madgraph_process_conditional_copula.py \
+    --config $REPO/configs/processes/gg_ttbar.json --speed-profile smoke \
+    --output $REPO/results/gg_ttbar_copula_smoke
+
+$PY $REPO/experiments/validate_madgraph_process_integral.py \
+    --config $REPO/configs/processes/gg_ttbar.json \
+    --checkpoint $REPO/results/gg_ttbar_copula_smoke/madgraph_gg_ttbar_2_final_model.pt \
+    --output $REPO/results/gg_ttbar_validation_smoke
+```
+
+Artifacts left behind by this session (all gitignored, none committed):
+
+```
+/eos/user/j/jlai/mango/MG5_aMC_v3_6_7/     MadGraph 3.6.7 (5891 files)
+/eos/user/j/jlai/mango/bin/mg5_aMC         python3.11 wrapper
+/eos/user/j/jlai/mango/venv/               python 3.11.5 environment
+generated/gg_ttbar_standalone/             MG5 standalone + matrix2py.so
+results/gg_ttbar_copula_smoke/             smoke checkpoint + summary
+results/gg_ttbar_validation_smoke/         held-out NF vs Sobol results
+```

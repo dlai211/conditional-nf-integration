@@ -255,14 +255,35 @@ numpy  scipy  torch  pandas  matplotlib  pytest
 vegas        # only for run_copula_vs_vegas_integrand.py
 ```
 
-On Windows, install `vegas` from a wheel — the source build fails:
+A set that has been verified end to end against this repository:
+
+| package | verified version |
+|---|---|
+| python | 3.11.5 |
+| numpy | 1.26.4 |
+| torch | 2.14.1+cpu |
+| scipy | 1.17.1 |
+| pandas | 3.0.6 |
+| matplotlib | 3.11.2 |
+| vegas | 6.4.1 |
+| pytest | 9.1.1 |
+
+No GPU is required to run anything here, but note that the **published results
+were produced on CUDA** — expect the larger benchmarks to be substantially
+slower on CPU than the quoted timings suggest. The synthetic drivers and the
+2-D scattering process have been run to completion on CPU.
+
+**On `numpy<2`.** You will see `numpy<2` recommended in older notes about this
+repository. That pin is **not a requirement of the code** — it is a requirement
+of *torch 2.3.x specifically*, which was compiled against NumPy 1.x and
+otherwise raises `RuntimeError: Numpy is not available` from every `.numpy()`
+call. With `torch 2.14.1+cpu` it is unnecessary, and NumPy 2 works. Pin it only
+if you are also pinning an old torch.
+
+On a machine without a NumPy-compatible wheel for `vegas`, use
 `pip install --only-binary :all: vegas`.
 
-**Version constraint:** if you use a torch 2.3.x build, you must keep
-`numpy<2`. torch 2.3 is compiled against NumPy 1.x and otherwise raises
-`RuntimeError: Numpy is not available` from every `.numpy()` call.
-
-### The one gotcha that will bite you first
+### Gotcha 1 — `sys.path` (all drivers)
 
 Running a driver directly usually fails with:
 
@@ -278,14 +299,62 @@ export PYTHONPATH="$PWD"     # from the repo root
 # or: pip install -e .
 ```
 
-Also note every driver writes to **relative** paths (`results/...`), so always
-run from the repository root. `results/` is gitignored; it does not exist in a
-fresh clone.
+Also note every driver writes to **relative** paths (`results/...`).
+`results/` is gitignored; it does not exist in a fresh clone.
+
+### Gotcha 2 — the working directory (MadGraph drivers only)
+
+The usual advice is "always run from the repository root". **For every
+MadGraph-dependent script, that advice is wrong and fails silently.**
+
+MadGraph's generated `setpara`/`lha_read` resolves its auxiliary Les Houches
+files relative to the **current working directory**, not relative to the
+parameter card it is handed. It looks for `./Cards/ident_card.dat` and then
+walks up five parent directories. If it does not find one, the Fortran code
+executes a `stop` — and Fortran `stop` **exits with status 0**. You get:
+
+```
+ Warning: file ident_card.dat not found in the parent directories!(lha_read)
+$ echo $?
+0
+```
+
+No traceback, no error, no output from any print statement after the failing
+call. A run that looks like it succeeded did nothing at all.
+
+The fix is to run with the working directory inside the generated standalone
+tree, where `Cards/` lives, and pass **absolute** paths for everything else:
+
+```bash
+cd generated/gg_ttbar_standalone          # CWD must see Cards/
+PYTHONPATH=$REPO python $REPO/experiments/validate_madgraph_process_integrand.py \
+    --config $REPO/configs/processes/gg_ttbar.json --points 500
+```
+
+Do not try to fix this with a single `Cards/` symlink in the repo root — every
+process has its own `Cards/`, so such a link can only be correct for one
+process at a time.
+
+### Gotcha 3 — a stray `py.py` breaks `pytest`
+
+After running the MadGraph setup step from a directory, that directory may
+contain a new file called **`py.py`**. It is not yours and not part of the
+repository: PLY, driven by MadGraph's ALOHA code generator, writes a generated
+LALR parser table into the current working directory under that name. Since
+Python puts the CWD first on `sys.path`, it shadows the `py` compatibility shim
+that pytest ships, and every `pytest` run from that directory then dies with:
+
+```
+AttributeError: module 'py' has no attribute 'path'
+```
+
+Delete the stray `py.py` (MadGraph may also leave `nsqso_born.inc` and
+`param.log` behind; both are harmless). Nothing in the repository depends on it.
 
 ### Fastest ways to confirm a working install
 
 ```bash
-python -m pytest tests/                                    # 12 tests, ~2 s
+python -m pytest tests/                                    # 12 tests
 python experiments/run_copula_bin_sweep.py --smoke         # ~1 min, writes plots
 ```
 
@@ -308,7 +377,7 @@ The engine has a built-in compute dial, `--speed-profile {smoke,fast,balanced,th
 The default `thorough` uses `kl_max_steps = 30_000` against smoke's `300` — about
 **100×** the budget. Always start with `--speed-profile smoke`.
 
-### The MadGraph dependency, and what it blocks
+### The MadGraph dependency — installed and exercised
 
 Part of this repository runs with no external dependencies at all; part of it
 cannot run without a MadGraph installation. The split is clean:
@@ -335,16 +404,54 @@ cannot run without a MadGraph installation. The split is clean:
 - `validate_madgraph_*` and `benchmark_nf_vs_madevent_tth.py` (the Sobol and
   MadEvent cross-checks)
 
-The blocking detail is that `MadGraphMatrixElement` globs for
-`SubProcesses/P*/matrix2py*.so` — a **Linux shared object**. On Windows this
-realistically means WSL or MSYS2 plus a Fortran compiler, not a quick `pip
-install`. Note also that the process configs point at
-`generated/<process>_standalone`, a gitignored directory absent from a fresh
+`MadGraphMatrixElement` globs for `SubProcesses/P*/matrix2py*.so` — a **Linux
+shared object**, so this needs a real Linux toolchain (or WSL/MSYS2 with
+`gfortran`), not just a `pip install`. Note also that the process configs point
+at `generated/<process>_standalone`, a gitignored directory absent from a fresh
 clone; you must generate it yourself.
 
-So: the **phase-space validation and the entire synthetic programme are
-runnable today**, but none of the scattering results in §5 are reproducible
-without standing up MadGraph.
+**This does work, and the procedure is short.** On a Linux box with `gfortran`:
+
+```bash
+# 1. MadGraph 3.6.7 (any recent 3.x should do)
+curl -sLO https://launchpad.net/mg5amcnlo/3.0/3.6.x/+download/MG5_aMC_v3.6.7.tar.gz
+tar xzf MG5_aMC_v3.6.7.tar.gz
+
+# 2. MG5's bin/mg5_aMC has a "#!/usr/bin/env python3" shebang; make sure that
+#    python is >= 3.10 (3.6.7 has dropped 3.9). A one-line wrapper is enough.
+
+# 3. generate + compile the standalone export
+cd $REPO
+PYTHONPATH=$PWD python experiments/setup_madgraph_process.py \
+    --config configs/processes/gg_ttbar.json --mg5 /path/to/mg5_aMC
+```
+
+Notes on what you will see:
+
+- The optional-tool warnings at MG5 startup (`fastjet-config`, `eMELA-config`,
+  `lhapdf-config` not found) are **harmless** — none are needed for LO partonic
+  matrix elements with fixed α_s and no PDFs.
+- `compile_libraries()` first tries the combined `make allmatrix2py.so` target.
+  On MG5 3.6.7 that target is unavailable, so the script falls back to per-process
+  `make matrix2py.so` and prints `Combined allmatrix2py target is unavailable;
+  trying per-process wrappers.` That fallback is the path that works, and it
+  produces exactly the `P*/matrix2py*.so` layout the loader wants.
+- Remember Gotcha 2 above: everything after this must run with the CWD inside
+  `generated/<process>_standalone/`.
+
+Once built, the `gg → t t̄` chain has been run end to end: the repo's 12 tests
+pass, the integrand validates (four-momentum conservation to 2e-13, positive
+Jacobian, ~47 000 matrix-element evaluations/second on one core), a smoke
+training run completes, and held-out validation reproduces the **published
+Sobol integrals in `results_public/gg_ttbar_validation/` exactly**, at all five
+held-out energies, with a smoke-budget NF agreeing to within 0.7σ. See the
+"Part II" section of `PRD.md` for the full record.
+
+So the scattering pipeline **does run**, and the `gg → t t̄` row of §5 is
+reproducible on CPU in a few minutes per stage. That is one of the four
+processes, though: the 5-D and 8-D benchmarks were not built here, and the 20-D
+fully-decayed ttH needs a working MadEvent, which is a separate installation
+again.
 
 ### Two drivers not worth attempting casually
 
@@ -412,6 +519,10 @@ Worth adding, having examined the tree:
   appear nowhere in the code. It can be inspected and cross-checked, but not
   regenerated from this tree. The same is true of several other curated
   `results_public/` runs, since the working `results/` tree was never committed.
+- Not everything is unregenerable, though. `results_public/gg_ttbar_validation/`
+  **is** regenerable, and doing so reproduces its Sobol column to every printed
+  digit. Both facts are worth knowing before judging the curated results as a
+  whole.
 
 The authors are unusually explicit about these boundaries, which is a point in
 the repository's favour.
@@ -426,4 +537,5 @@ the repository's favour.
 | `docs/METHODS_AND_APPLICATIONS.md` | full mathematical and implementation description |
 | `docs/VALIDATION_RESULTS.md` | the 20-D validation ladder, step by step |
 | `docs/REPRODUCIBILITY.md` | the documented 9-step validation order |
-| `PRD.md` | working notes: environment setup, verified smoke runs, blockers |
+| `PRD.md`, Part I | working notes (Windows): repository structure, verified synthetic smoke runs, blockers |
+| `PRD.md`, Part II | working notes (Linux): MadGraph 3.6.7 installed, the working-directory bug, and the reproduced `gg → t t̄` scattering results |
