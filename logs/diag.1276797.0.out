@@ -1,0 +1,23 @@
+pwd            = /pool/condor/dir_43569
+hostname       = b9g03p9785.cern.ch
+--- is the repo visible? ---
+  YES  /eos/user/j/jlai/mango/conditional-nf-integration
+  YES  /eos/user/j/jlai/mango/conditional-nf-integration/experiments
+  YES  /eos/user/j/jlai/mango/venv
+--- sandbox contents ---
+total 68
+drwx------.  5 jlai   zp     4096 Oct  9 04:09 .
+drwxr-xr-x. 25 condor condor 4096 Oct  9 04:09 ..
+-rwx------.  1 jlai   zp       48 Oct  9 04:09 .chirp.config
+-rw-r--r--.  1 jlai   zp        0 Oct  9 04:09 _condor_stderr
+-rw-r--r--.  1 jlai   zp      291 Oct  9 04:09 _condor_stdout
+-rwxr-xr-x.  1 jlai   zp      477 Oct  9 04:09 diagnose.sh
+-rw-------.  1 jlai   zp     4806 Oct  9 04:09 jlai.cc
+-rw-r--r--.  1 jlai   zp     7008 Oct  9 04:09 .job.ad
+-rw-r--r--.  1 jlai   zp     8702 Oct  9 04:09 .machine.ad
+drwx------.  2 jlai   zp        6 Oct  9 04:09 srv
+drwx------.  2 jlai   zp        6 Oct  9 04:09 tmp
+-rw-r--r--.  1 jlai   zp     8637 Oct  9 04:09 .update.ad
+drwx------.  3 jlai   zp       17 Oct  9 04:09 var
+-rw-r--r--.  1 jlai   zp      150 Oct  9 04:09 .xrdcp_plugin.py.in
+--- _CONDOR_SCRATCH_DIR = /pool/condor/dir_43569

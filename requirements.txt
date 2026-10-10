@@ -1,0 +1,74 @@
+# Python requirements for conditional-nf-integration.
+#
+# This repository declares no dependencies of its own: `pyproject.toml` has no
+# [project].dependencies and there is no upstream requirements.txt or
+# environment.yml.  This file records the set that has actually been installed
+# and exercised against the code, including the MadGraph scattering pipeline
+# (generate -> train -> held-out validation) on CPU.
+#
+# Install with:
+#     python -m pip install -r requirements.txt
+#
+# Verified on Python 3.11.5 (Linux).  See RUNBOOK.md for the full procedure.
+
+# --- core: needed by every driver -------------------------------------------
+numpy==1.26.4
+scipy==1.17.1
+pandas==3.0.6
+matplotlib==3.11.2
+torch==2.14.1
+
+# --- only needed by experiments/run_copula_vs_vegas_integrand.py -------------
+# The sole VEGAS baseline in the repository.  Every other driver runs without it.
+vegas==6.4.1
+
+# --- only needed to run the test suite --------------------------------------
+pytest==9.1.1
+
+
+# ============================================================================
+# Notes on individual pins
+# ============================================================================
+#
+# numpy==1.26.4
+#     NOT actually required by this code.  Older notes about this repository
+#     recommend `numpy<2`; that constraint belongs to torch 2.3.x, which was
+#     compiled against NumPy 1.x and otherwise raises
+#     "RuntimeError: Numpy is not available" from every .numpy() call.
+#     torch 2.14.1 works with NumPy 2 as well.  The pin is kept here only so
+#     this file reproduces one exact known-good environment.  If you change
+#     torch, you can relax this.
+#
+# torch==2.14.1
+#     CPU-only is sufficient; no GPU is required for anything in this
+#     repository.  To avoid downloading the large CUDA wheel, install torch
+#     from the CPU index instead of PyPI:
+#
+#         python -m pip install torch==2.14.1 \
+#             --index-url https://download.pytorch.org/whl/cpu
+#
+#     (the build string will read 2.14.1+cpu).  If you are on a machine where
+#     the NumPy bridge breaks, see the numpy note above.
+#
+# vegas==6.4.1
+#     Pulls in gvar.  On platforms without a compatible NumPy wheel for the
+#     source build, use:
+#
+#         python -m pip install --only-binary :all: vegas
+#
+# scipy / pandas / matplotlib
+#     Used by, respectively: the QMC Sobol replicates and logsumexp in the
+#     validation drivers; CSV/DataFrame output in most drivers; plot writing in
+#     the *_sweep drivers.
+#
+# ============================================================================
+# Not a Python package: MadGraph
+# ============================================================================
+#
+# MadGraph5_aMC@NLO is required by the experiments/setup_madgraph_*,
+# run_madgraph_* and validate_madgraph_* scripts, and by nothing else.  It is a
+# standalone Fortran/C++ package, not a pip dependency -- it is downloaded and
+# built separately.  See RUNBOOK.md sections 5-8.
+#
+# Also required for it: gfortran, and a Python >= 3.10 on the interpreter that
+# runs bin/mg5_aMC (MG5 3.6.7 has dropped support for Python <= 3.9).

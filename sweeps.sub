@@ -1,0 +1,37 @@
+universe                = vanilla
+# NOTE: with initialdir set, the executable path is NOT resolved against it,
+# and the EosSubmit schedds require an absolute /eos path here.
+executable              = /eos/user/j/jlai/mango/conditional-nf-integration/run_batch.sh
+initialdir              = /eos/user/j/jlai/mango/conditional-nf-integration
+
+# Logs
+output                  = logs/$(ClusterId).$(ProcId).out
+error                   = logs/$(ClusterId).$(ProcId).err
+# One log file per cluster: $(ClusterId) only, never $(ProcId).
+log                     = logs/$(ClusterId).log
+
+# Resource requests
+request_cpus            = 2
+request_memory          = 4 GB
+request_disk            = 2 GB
+
+# Flavor for CERN LxPlus Batch.
+# "workday" is a maximum wall time, not a reservation, so a job that finishes
+# early still exits early and the headroom costs nothing.  The smoke budgets
+# below measure ~15-25 min on a busy 16-core login node; a 2-CPU batch slot is
+# slower, and a previous 2-hour "longlunch" submission was killed by the limit.
++JobFlavour             = "workday"
+
+# Queue jobs.
+# (condor_submit warns that multiple `queue` statements are deprecated and will
+# be removed in the 25.x series; harmless for now.)
+#
+# Both runs use their smoke budgets so they complete in a predictable window.
+# Without --speed-profile, the adaptive search defaults to "thorough"
+# (kl_max_steps=30_000, ~100x smoke) -- a multi-day job.  Without --smoke, the
+# bin sweep runs 4 benchmarks x 3 dims x 4 bins x 3 seeds = 144 models.
+arguments               = experiments/run_adaptive_integrand_structure_search.py --speed-profile smoke --no-compile-kernels
+queue
+
+arguments               = experiments/run_copula_bin_sweep.py --smoke
+queue

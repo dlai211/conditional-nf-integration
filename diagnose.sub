@@ -1,0 +1,11 @@
+universe                = vanilla
+executable              = /eos/user/j/jlai/mango/conditional-nf-integration/diagnose.sh
+initialdir              = /eos/user/j/jlai/mango/conditional-nf-integration
+output                  = logs/diag.$(ClusterId).$(ProcId).out
+error                   = logs/diag.$(ClusterId).$(ProcId).err
+log                     = logs/diag.$(ClusterId).log
+request_cpus            = 1
+request_memory          = 1 GB
+request_disk            = 1 GB
++JobFlavour             = "espresso"
+queue

@@ -1,0 +1,2 @@
+=== Host: b9p08p4553.cern.ch | Date:Fri Oct  9 03:37:48 AM CEST 2026 ===
+Executing: experiments/run_adaptive_integrand_structure_search.py --no-compile-kernels
