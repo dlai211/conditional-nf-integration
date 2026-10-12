@@ -97,6 +97,15 @@ def write_command_card(path: Path, output: Path, process: str) -> None:
 
 
 def compile_libraries(output: Path) -> list[Path]:
+    # Windows: MadGraph's makefiles are POSIX-only (SHELL=/bin/bash, uname,
+    # -Wl,-rpath) and produce no importable wrapper.  Build the f2py extension
+    # directly instead.  See madgraph_windows_build.py.
+    if sys.platform == "win32":
+        from madgraph_windows_build import build_matrix2py
+
+        print("Windows build: compiling matrix2py with f2py + MinGW.")
+        return build_matrix2py(output)
+
     subprocess_root = output / "SubProcesses"
     combined = subprocess.run(
         ["make", "allmatrix2py.so"],

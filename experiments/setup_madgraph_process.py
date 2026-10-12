@@ -42,7 +42,17 @@ def main() -> None:
         handle.write(commands)
         command_card = Path(handle.name)
     try:
-        subprocess.run([mg5, str(command_card)], check=True)
+        # Run MG5 from a throwaway directory.  Its ALOHA/PLY code generator
+        # writes a generated LALR parser table named `py.py` into the *current
+        # working directory*, along with `nsqso_born.inc` and `param.log`.
+        # Because Python puts the CWD first on sys.path, a stray `py.py` then
+        # shadows the `py` shim that pytest ships and every `pytest` run from
+        # that directory dies with
+        #     AttributeError: module 'py' has no attribute 'path'
+        # The output location is absolute in the command card, so the working
+        # directory is free to be somewhere disposable.
+        with tempfile.TemporaryDirectory(prefix="mg5_run_") as run_dir:
+            subprocess.run([mg5, str(command_card)], check=True, cwd=run_dir)
     finally:
         command_card.unlink(missing_ok=True)
 

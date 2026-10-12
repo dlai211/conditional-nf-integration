@@ -34,7 +34,14 @@ class MadGraphMatrixElement:
     def __init__(self, standalone: Path, alpha_s: float = 0.118):
         self.standalone = Path(standalone).resolve()
         self.param_card = self.standalone / "Cards" / "param_card.dat"
-        libraries = sorted((self.standalone / "SubProcesses").glob("P*/matrix2py*.so"))
+        # The upstream loader globs only "*.so" (the POSIX/MadGraph default).
+        # Windows builds of the f2py wrapper land as "matrix2py.cp310-win_amd64.pyd"
+        # instead, so accept both extensions.  See RUNBOOK.md section 3.
+        subprocesses = self.standalone / "SubProcesses"
+        libraries = sorted(
+            list(subprocesses.glob("P*/matrix2py*.so"))
+            + list(subprocesses.glob("P*/matrix2py*.pyd"))
+        )
         if not libraries:
             raise FileNotFoundError(f"No matrix2py library below {self.standalone}")
         process_directories = sorted({item.parent.resolve() for item in libraries})
