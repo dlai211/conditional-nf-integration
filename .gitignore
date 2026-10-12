@@ -14,9 +14,12 @@ venv/
 .vscode/
 *~
 
-# Generated MadGraph builds and compiled objects
-generated/
+# Generated MadGraph builds are TRACKED, so the generated Fortran, Cards and
+# process metadata can be diffed against another machine's build.  See
+# REPRODUCTION_COMMANDS.md.
 mg5/
+# Compiled objects and archives stay ignored - they are rebuildable from the
+# committed sources above, and differ by toolchain anyway.
 *.so
 *.o
 *.a
@@ -35,8 +38,11 @@ mg5/
 *.log
 param.log
 
-# Working result tree: publish only curated compact artifacts
-results/
+# Result trees are TRACKED too, so a run can be compared against the curated
+# tree directly.
+# NOTE: *.pt checkpoints are still excluded by the "Large/transient scientific
+# artifacts" block above.  Delete that *.pt line if the trained checkpoints
+# should be tracked as well.
 !results_public/
 
 # Local build products

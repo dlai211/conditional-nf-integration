@@ -1,0 +1,38 @@
+{
+  "name": "gg_tth",
+  "description": "Undecayed massive three-body process",
+  "model": "sm",
+  "process": "g g > t t~ h @1",
+  "standalone": "generated/gg_tth_standalone",
+  "phase_space": {
+    "type": "three_body",
+    "dimension": 5,
+    "final_pdgs": [
+      6,
+      -6,
+      25
+    ]
+  },
+  "condition": {
+    "name": "sqrt_s_hat_gev",
+    "minimum": 480.0,
+    "maximum": 2000.0,
+    "held_out": [
+      500.0,
+      700.0,
+      1000.0,
+      1500.0,
+      1950.0
+    ]
+  },
+  "config": "C:\\Users\\laiji\\test\\conditional-nf-integration\\configs\\processes\\gg_tth.json",
+  "libraries": [
+    "C:\\Users\\laiji\\test\\conditional-nf-integration\\generated\\gg_tth_standalone\\SubProcesses\\P1_gg_ttxh\\matrix2py.cp310-win_amd64.pyd"
+  ],
+  "madgraph_api": [
+    {
+      "module": "matrix2py",
+      "directory": "C:\\Users\\laiji\\test\\conditional-nf-integration\\generated\\gg_tth_standalone\\SubProcesses\\P1_gg_ttxh"
+    }
+  ]
+}

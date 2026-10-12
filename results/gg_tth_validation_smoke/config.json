@@ -1,0 +1,21 @@
+{
+  "config": "C:\\Users\\laiji\\test\\conditional-nf-integration\\configs\\processes\\gg_tth.json",
+  "checkpoint": "C:\\Users\\laiji\\test\\conditional-nf-integration\\results\\gg_tth_copula_smoke\\madgraph_gg_tth_5_final_model.pt",
+  "energies": null,
+  "sobol_power": 18,
+  "sobol_replicates": 8,
+  "nf_evals": 500000,
+  "gpu_chunk": 10000,
+  "uniform_fraction": 0.1,
+  "alpha_s": 0.118,
+  "seed": 20260920,
+  "device": "cpu",
+  "output": "C:\\Users\\laiji\\test\\conditional-nf-integration\\results\\gg_tth_validation_smoke",
+  "resolved_energies": [
+    500.0,
+    700.0,
+    1000.0,
+    1500.0,
+    1950.0
+  ]
+}
