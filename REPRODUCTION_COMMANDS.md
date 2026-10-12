@@ -228,6 +228,17 @@ For reference, the same check on Linux for `gg_ttbar` gave
 
 ## 7. Comparison against `results_public/`
 
+**Training budget, stated once and applying to every table below.** The runs in
+`results/` used `--speed-profile smoke` (300 KL steps). The published runs in
+`results_public/` used `--speed-profile thorough` (30 000 KL steps) on CUDA.
+Every row below is labelled `smoke` or `thorough` so the two are not confused;
+where a table has no label, the column header carries it.
+
+The Sobol column (§7.1) is **not** affected by this: it is a property of the
+generated matrix element, the phase-space map and the QMC protocol, none of
+which the training budget touches. That is why it is the meaningful
+build-level check.
+
 ### 7.1 Sobol column — the build check
 
 Compared at the **per-replicate** level (8 replicates × 5 energies = 40 rows
@@ -245,21 +256,64 @@ applied to the 8-D matrix element, and below the precision of the published
 summary. At the summary level all 15 values are identical to every printed
 digit.
 
-### 7.2 NF column — **not** a reproduction, by design
+### 7.2 Training summaries — `*_final_summary.csv`
 
-These runs use `--speed-profile smoke` (300 KL steps). The published models are
-`thorough` (30 000 steps) on CUDA. Reported for completeness, not as a
-reproduction:
+`smoke` (here) vs `thorough` (published), the file each training run writes at
+the end of its budget:
 
-| process | ESS/N here (smoke) | ESS/N published (thorough) | max pull |
+| process | dim | edges smoke / thorough | ESS smoke | ESS thorough | ratio | Î smoke | Î thorough | ratio |
+|---|---:|:---:|---:|---:|:---:|---:|---:|:---:|
+| gg → t t̄ | 2 | 1 / 1 | 0.8054 | 0.8406 | 0.96 | 2.632163e-08 | 2.635498e-08 | 0.99873 |
+| gg → t t̄ H | 5 | 10 / 10 | 0.8159 | 0.9176 | 0.89 | 9.646322e-11 | 9.697110e-11 | 0.99476 |
+| u ū → 4ℓ | 8 | 28 / 28 | 0.4535 | 0.5078 | 0.89 | 3.697135e-11 | 3.735932e-11 | 0.98962 |
+
+| process | log w std smoke | log w std thorough |
+|---|---:|---:|
+| gg → t t̄ | 0.498 | 0.453 |
+| gg → t t̄ H | 0.700 | 0.595 |
+| u ū → 4ℓ | 1.159 | 1.023 |
+
+Three things to read off this table:
+
+* the **edge count is identical in all three cases** — the graph-selection step
+  lands on the same structure from 300 KL steps as from 30 000, which is a
+  structural agreement independent of budget;
+* the **integral estimates agree to 0.1–1 %**;
+* ESS is uniformly ~10 % lower for `smoke`, with the log-weight spread
+  correspondingly ~10–13 % wider.
+
+### 7.3 Held-out NF column — **not** a reproduction, by design
+
+`smoke` models (here) against the published `thorough` models, on fresh samples
+at held-out energies:
+
+| process | ESS/N smoke | ESS/N thorough | max pull |
 |---|---:|---:|---:|
 | gg → t t̄ | 0.812 – 0.980 | 0.981 – 0.998 | 0.89σ |
 | gg → t t̄ H | 0.797 – 0.917 | 0.959 – 0.987 | 1.54σ |
 | u ū → 4ℓ | 0.806 – 0.865 | 0.927 – 0.941 | 0.42σ |
 
-The **learned graph topology came out identical in all three cases**
-(1, 10 and 28 edges, same edge sets), which is a structural agreement
-independent of the training budget.
+### 7.4 Two different "ESS" numbers per model
+
+Worth separating, because the two diagnostics differ by a lot — and they differ
+for the **published** models as much as for these. Both columns below are the
+authors' own data, read from `results_public/`:
+
+| process | training-time ESS (thorough, published) | validated ESS (thorough, published) |
+|---|---:|---:|
+| gg → t t̄ | 0.8406 | 0.981 – 0.998 |
+| gg → t t̄ H | 0.9176 | 0.959 – 0.987 |
+| u ū → 4ℓ | **0.5078** | **0.927 – 0.941** |
+
+For the 8-D process the `final_summary.csv` figure of 0.51 sits against a model
+that actually delivers 0.93 on held-out samples. Both are legitimate
+measurements of different things, but `final_summary.csv` is the file a reader
+opens first.
+
+A practical consequence for reading §7.2: the training-time ESS is the
+pessimistic diagnostic on both sides, so the smoke-vs-thorough gap there
+(0.4535 vs 0.5078 for 8-D) is much narrower than the gap in actual held-out
+performance (§7.3: 0.806–0.865 vs 0.927–0.941).
 
 ---
 
@@ -284,14 +338,7 @@ Offered as observations from running the code, not as criticisms.
    is not. The tables don't currently distinguish them.)
 
 3. **`final_summary.csv`'s `ess` reads much lower than the validated ESS**, for
-   the published models as well as these:
-
-   | process | training-time ESS (thorough, published) | validated ESS (published) |
-   |---|---:|---:|
-   | gg → t t̄ | 0.8406 | 0.981 – 0.998 |
-   | gg → t t̄ H | 0.9176 | 0.959 – 0.987 |
-   | u ū → 4ℓ | 0.5078 | 0.927 – 0.941 |
-
-   Both are legitimate measurements, but for the 8-D case the summary figure is
-   less than half the model's actual held-out performance, and the summary CSV
-   is the file a reader opens first.
+   the published models as much as for these. The numbers are in §7.4; the
+   point is that for the 8-D process the summary figure (0.5078) is less than
+   half the model's actual held-out performance (0.927 – 0.941), and
+   `final_summary.csv` is the file a reader opens first.
