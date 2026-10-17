@@ -276,7 +276,183 @@ are consistent with that caveat rather than in tension with it.
 
 ---
 
-## 6. How to reproduce
+## 6. GPU runs
+
+See `RUNBOOK_GPU.md` for the setup and commands.
+
+**Hardware.** NVIDIA GeForce RTX 3060 Laptop GPU, 6144 MiB (~4.3 GiB usable
+with a desktop session), driver 546.92. The conda `workspace` environment
+shipped `torch 2.3.0+cpu` — the CPU-only build — so `torch.cuda.is_available()`
+was `False` and every prior run had silently fallen back to CPU. It was
+replaced with `torch 2.3.0+cu121`; the version is held at 2.3.0 so the
+`numpy<2` pin stays valid. The 12-test suite passes after the swap.
+
+### 6.1 `gg → t t̄`, smoke — CPU vs GPU
+
+Identical config, identical budget, only `--device` differs:
+
+| | CPU | GPU |
+|---|---:|---:|
+| training wall clock | **303 s** | **304 s** |
+| validation wall clock | — | 208 s |
+| learned graph | 1 edge | 1 edge |
+| final ESS | 0.8054 | 0.8074 |
+| final Î | 2.632163e-08 | 2.647052e-08 |
+| log w std | 0.4975 | 0.5145 |
+
+**The GPU changes the runtime by 0.3 %.** The two models are statistically
+indistinguishable — the same one-edge graph, ESS within 0.25 %, Î within 0.6 %;
+the residual scatter is a different training trajectory, since the RNG stream
+differs by device.
+
+The Sobol column of the GPU validation is **bit-identical** to
+`results_public/gg_ttbar_validation` at all five energies (relative difference
+`0.00e+00`), so the build-level check is unaffected by the device.
+
+GPU held-out NF results:
+
+| E [GeV] | NF [pb] | ESS/N | pull vs Sobol |
+|---:|---:|---:|---:|
+| 400 | 12.835344 ± 0.0067 | 0.879 | −1.43 |
+| 650 | 16.916319 ± 0.0027 | 0.987 | −0.09 |
+| 1000 | 11.37313 ± 0.0042 | 0.935 | +1.18 |
+| 1500 | 6.861171 ± 0.0026 | 0.933 | +0.31 |
+| 1950 | 4.7780877 ± 0.0014 | 0.960 | +1.50 |
+
+### 6.2 Why the GPU buys nothing here
+
+Two compounding causes, both verified in the code rather than inferred.
+
+**(a) The matrix element is the ceiling, and it runs on the CPU.** It is
+evaluated one event per Python call:
+
+```python
+for index, event in enumerate(momenta):
+    values[index] = float(self.evaluate(p, self.alpha_s, -1))
+```
+
+The published `gg_ttbar` validation ran 500 000 evaluations in 5.34 s — about
+**93 600/second** — *with the flow already on CUDA*. The matrix-element
+throughput measured on this box, on **one CPU core**, is **96 600/second**.
+Those numbers match, which says the matrix element dominates the wall clock
+whether or not the flow is on a GPU.
+
+**(b) The driver round-trips host↔device every chunk.** From
+`run_madgraph_process_conditional_copula.py`:
+
+```python
+unit_numpy = unit.detach().cpu().double().numpy()          # GPU → host
+for start in range(0, len(unit_numpy), me_chunk):
+    pieces.append(evaluator.log_integrand(...))             # CPU matrix element
+return torch.as_tensor(np.concatenate(pieces), device=unit.device, ...)  # host → GPU
+```
+
+Each chunk of `--me-chunk` (default 512) samples on the GPU, copies to the
+host, evaluates the matrix element on one CPU core, and copies back. The GPU's
+gain on the flow is spent crossing the bus, and then the CPU does the part that
+actually costs time.
+
+### 6.3 Consequence for the Alpaka port
+
+**Porting the flow to Alpaka cannot deliver a ≥10× throughput gate on this
+architecture** — not because Alpaka is the wrong tool, but because the flow is
+not where the time is. Three routes actually move the number:
+
+1. remove the round trip (co-resident sampling and evaluation) — small change,
+   worth doing regardless;
+2. move the matrix element to the GPU — substantially harder than the flow, and
+   not currently in the proposal's scope. This is where the real 10× lives;
+3. benchmark at a multiplicity where the flow dominates.
+
+Because the gate is defined on total event-generation rate, and the matrix
+element is CPU-bound, no amount of Alpaka work on the flow alone will pass it.
+
+### 6.4 Thorough on GPU
+
+All three processes at `--speed-profile thorough --device cuda`, run
+sequentially, writing to `results/<proc>_copula_thorough_gpu/` and
+`results/<proc>_validation_thorough_gpu/`.
+
+#### `gg → t t̄` — the published thorough model, reproduced
+
+Wall clock **5 h 05 min** (10:36:11 → 15:41:16).
+
+| quantity | ours (thorough, GPU) | published (`gg_ttbar_thorough_unbuffered`) | rel. diff |
+|---|---:|---:|---:|
+| learned graph | 1 edge | 1 edge | — |
+| ESS | 0.8407084868615254 | 0.8406046449897572 | **1.2e-04** |
+| Î | 2.635615770700724e-08 | 2.6354984203294262e-08 | **4.5e-05** |
+| log w std | 0.4529427119180449 | 0.4525016120941321 | 9.7e-04 |
+
+ESS to **0.012 %**, Î to **0.0045 %**. This is the strongest model-level
+agreement in this document: an independent build, a different Fortran
+toolchain, a different operating system, and the full `thorough` training
+budget landing on the authors' own published numbers.
+
+Note this is a much tighter agreement than the smoke model achieved (§4) —
+0.8054 vs 0.8406 there, against 1.2e-04 relative here. Training budget, not the
+build, was the limiting factor, exactly as suspected.
+
+#### How the ESS evolved during training
+
+| stage | ESS |
+|---|---:|
+| adaptive round 0 | 0.840517 |
+| adaptive round 1 | 0.841694 |
+| adaptive round 2 | 0.839931 |
+| χ² fine-tuning | 0.840877 |
+| **final** | **0.840708** |
+
+Two observations worth passing to Brown:
+
+* **The third adaptive round was counterproductive** — round 2 finished *below*
+  round 1 (0.839931 vs 0.841694), and the χ² stage only partly recovered it.
+  On this process the final `adaptive_rounds = 3` setting does not pay for
+  itself.
+* **The χ² stage is frozen.** Its loss, local ESS and global ESS were
+  *bit-identical* across 4 200 consecutive steps (loss −0.560217, ESS 0.840877)
+  — roughly 23 minutes of wall clock producing byte-identical output. The
+  profile's `chi2_max_steps = 6000` is far more than this process uses.
+
+Both are budget-provisioning issues, not code faults, but together they account
+for a meaningful share of the 5-hour runtime.
+
+#### Note on file placement
+
+The sweep script passed `--output` to the validation command but not to the
+training one, so the driver fell back to its relative-path default and wrote to
+`generated/gg_ttbar_standalone/results/gg_ttbar_conditional_copula/`. The files
+were moved to `results/gg_ttbar_copula_thorough_gpu/` afterwards; the checkpoint
+and summary are unaffected. The script is corrected for future runs.
+
+#### `gg → t t̄ H` and `u ū → W⁺W⁻ → 4ℓ` — not completed
+
+The sweep was stopped at **18:53 on 2026-10-16** so the machine could be shut
+down.
+
+| process | state when stopped |
+|---|---|
+| `gg → t t̄ H` | KL round 0 of 3, step ~3 000, val NLL −0.734990. **Partial and discarded** — no checkpoint is written until a run finishes. |
+| `u ū → W⁺W⁻ → 4ℓ` | never started |
+
+`gg_ttbar`'s result above is complete and unaffected; it was written to disk at
+15:41.
+
+Runtime observed: `gg_ttbar` ran at 0.5–1.0 s/step and took 5 h 05 min;
+`gg_tth`'s 5-D matrix element runs at 1.5–2.0 s/step, so it was on course for
+roughly 10–12 h, and the 8-D process would be slower again.
+
+**There are no intermediate checkpoints**, so an interrupted thorough run
+restarts from zero. Any future attempt needs an uninterrupted block for the
+whole process.
+
+To resume, run `mg5_scratch/run_thorough_gpu_resume.sh`, which skips the
+completed `gg_ttbar`, trains and validates the remaining two, and fixes the
+`--output` bug described above.
+
+---
+
+## 7. How to reproduce
 
 See `RUNBOOK.md` for the full procedure, or run:
 

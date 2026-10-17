@@ -93,12 +93,94 @@ the same `generate` line gets the same setup.
 
 ---
 
-## 3. Commands, in order
+## 3. Windows — setup and individual commands
 
-`$REPO` = `C:/Users/laiji/test/conditional-nf-integration`
-`$PY`   = the conda 3.10 interpreter
+### 3.1 One-time setup
 
-### 3.1 Generate and compile a standalone (once per process)
+**Shell variables used throughout this section:**
+
+```bash
+export REPO="C:/Users/laiji/test/conditional-nf-integration"
+export PY="/c/Users/laiji/.conda/envs/workspace/python.exe"
+export MG5="C:/Users/laiji/test/bin/mg5_aMC.bat"
+```
+
+Note the two path styles: `$REPO` and `$MG5` are **Windows-style** because they
+are passed as arguments to `python.exe`, which does not understand `/c/...`;
+`$PY` is POSIX-style because Git Bash has to *execute* it.
+
+**(a) Python environment** — conda env `workspace`, Python 3.10.14:
+
+```bash
+conda activate workspace
+pip install "numpy<2" pytest
+pip install --only-binary :all: vegas
+```
+
+`numpy<2` is required **only** because this env carries torch 2.3.0, which is
+compiled against NumPy 1.x. With a newer torch the pin is unnecessary — see
+`requirements.txt`.
+
+**(b) MinGW Fortran toolchain** — from a MSYS2 shell:
+
+```bash
+pacman -S --needed mingw-w64-x86_64-gcc-fortran
+```
+
+**(c) MadGraph 3.6.7:**
+
+```bash
+cd /c/Users/laiji/test
+tar xzf /c/Users/laiji/Downloads/MG5_aMC_v3.6.7.tar.gz
+```
+
+`tar` exits 2 and reports three failed symlinks (`gpu/rambo.cc`,
+`pineappl_maxproc.inc`, `NNPDFDriver.f`). All three belong to GPU/NLO/PDF
+features this repository never touches; the tree is usable.
+
+**(d) MG5 launcher** — `bin/mg5_aMC` is a POSIX script with a
+`#!/usr/bin/env python3` shebang that Windows `CreateProcess` cannot execute,
+so `setup_madgraph_process.py` (which does `subprocess.run([mg5, card])`) needs
+a `.bat`. Create `C:\Users\laiji\test\bin\mg5_aMC.bat`:
+
+```bat
+@echo off
+set "PATH=C:\msys64\usr\bin;C:\msys64\mingw64\bin;%PATH%"
+"C:\Users\laiji\.conda\envs\workspace\python.exe" "C:\Users\laiji\test\MG5_aMC_v3_6_7\bin\mg5_aMC" %*
+```
+
+MSYS2 goes on `PATH` because MG5 hard-requires `gzip` at startup.
+
+**(e) CUDA-enabled torch, for GPU runs only.** The conda env ships
+`torch 2.3.0+cpu` — the CPU-only build — so `torch.cuda.is_available()` returns
+`False` and every run silently falls back to CPU:
+
+```bash
+"$PY" -m pip install "torch==2.3.0+cu121" \
+    --index-url https://download.pytorch.org/whl/cu121
+```
+
+`+cu121` and not `+cu124` because the installed driver (546.92) advertises CUDA
+12.3, and CUDA minor-version compatibility makes cu121 the safe match. The torch
+*version* is held at 2.3.0 so the `numpy<2` pin stays valid.
+
+Verify before running anything:
+
+```bash
+"$PY" -c "
+import torch
+print('torch          ', torch.__version__)
+print('cuda available ', torch.cuda.is_available())
+print('device         ', torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-')
+free, total = torch.cuda.mem_get_info()
+print('vram free/total: %.2f / %.2f GiB' % (free/2**30, total/2**30))
+"
+```
+
+To revert to CPU: same command with `torch==2.3.0+cpu` and
+`--index-url https://download.pytorch.org/whl/cpu`.
+
+### 3.2 Generate and compile a standalone (once per process)
 
 ```bash
 cd "$REPO"
@@ -109,7 +191,7 @@ PYTHONPATH="$REPO" $PY experiments/setup_madgraph_process.py \
 
 (repeat for `gg_tth.json`, `uu_ww_4l.json`)
 
-### 3.2 Integrand sanity check
+### 3.3 Integrand sanity check
 
 > Must run with the **CWD inside the standalone directory** — `lha_read.f`
 > resolves `./Cards/` relative to the CWD and calls a Fortran `stop` (exit
@@ -121,7 +203,9 @@ PYTHONPATH="$REPO" $PY experiments/validate_madgraph_process_integrand.py \
     --config "$REPO/configs/processes/gg_ttbar.json" --points 500
 ```
 
-### 3.3 Train
+### 3.4 Train
+
+**CPU:**
 
 ```bash
 cd "$REPO/generated/gg_ttbar_standalone"
@@ -132,7 +216,32 @@ PYTHONPATH="$REPO" $PY -u experiments/run_madgraph_process_conditional_copula.py
     --output "$REPO/results/gg_ttbar_copula_smoke"
 ```
 
-### 3.4 Held-out validation
+**GPU** — three differences from the CPU form:
+
+```bash
+cd "$REPO/generated/gg_ttbar_standalone"
+PYTHONPATH="$REPO" $PY -u experiments/run_madgraph_process_conditional_copula.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" \
+    --speed-profile smoke \
+    --device cuda \
+    --output "$REPO/results/gg_ttbar_copula_smoke_gpu"
+```
+
+1. `--device cuda` — pass it explicitly; the default is decided at import time
+   by `torch.cuda.is_available()`, so a silent CPU fallback is otherwise easy.
+2. **Drop `--no-compile-kernels`.** That flag exists to *disable* the CUDA
+   kernel-compile path; on a GPU you want it on.
+3. Write to a `_gpu`-suffixed output directory so the CPU and GPU runs can be
+   compared rather than silently overwriting each other.
+
+> **`--output` is mandatory in both forms.** Omit it and the driver falls back
+> to the relative default `results/<name>_conditional_copula`, which resolves
+> against the CWD — i.e. inside `generated/<proc>_standalone/`, where nothing
+> looks for it. This is a silent misplacement, not an error.
+
+### 3.5 Held-out validation
+
+**CPU:**
 
 ```bash
 cd "$REPO/generated/gg_ttbar_standalone"
@@ -140,6 +249,17 @@ PYTHONPATH="$REPO" $PY -u experiments/validate_madgraph_process_integral.py \
     --config "$REPO/configs/processes/gg_ttbar.json" \
     --checkpoint "$REPO/results/gg_ttbar_copula_smoke/madgraph_gg_ttbar_2_final_model.pt" \
     --output "$REPO/results/gg_ttbar_validation_smoke"
+```
+
+**GPU:** add `--device cuda` and point at the `_gpu` checkpoint.
+
+```bash
+cd "$REPO/generated/gg_ttbar_standalone"
+PYTHONPATH="$REPO" $PY -u experiments/validate_madgraph_process_integral.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" \
+    --device cuda \
+    --checkpoint "$REPO/results/gg_ttbar_copula_smoke_gpu/madgraph_gg_ttbar_2_final_model.pt" \
+    --output "$REPO/results/gg_ttbar_validation_smoke_gpu"
 ```
 
 All validation options are the driver defaults, which match the committed
@@ -151,11 +271,129 @@ uniform_fraction = 0.1      alpha_s = 0.118      seed = 20260920
 ```
 
 Energies are `condition.held_out` from each config. The one settings difference
-is `--device`: `cpu` here, `cuda` in the committed configs.
+against the published configs is `--device`: `cpu` here, `cuda` in the committed
+configs.
+
+> The **Sobol column is hardware-independent** and reproduces
+> `results_public/` bit-for-bit on either device. The **NF column is not** —
+> and would not reproduce bit-for-bit even with the authors' checkpoint, since
+> torch's CPU and CUDA RNGs produce different streams from the same seed.
 
 ---
 
-## 4. The one deviation: how the wrapper was compiled
+## 4. lxplus — setup and individual commands
+
+### 4.1 What is already installed there
+
+From `env.sh` in this repository (paths are specific to
+`/eos/user/j/jlai/mango`):
+
+| what | path |
+|---|---|
+| repo | `$NFI_ROOT/conditional-nf-integration` |
+| Python | `$NFI_ROOT/venv/bin/python` (3.11.5) |
+| MadGraph | `$NFI_ROOT/MG5_aMC_v3_6_7`, invoked through `$NFI_ROOT/bin/mg5_aMC` |
+| standalone | `$NFI_REPO/generated/gg_ttbar_standalone` |
+
+```bash
+source /eos/user/j/jlai/mango/conditional-nf-integration/env.sh
+```
+
+That exports `NFI_REPO`, `NFI_PY`, `NFI_MG5`, `NFI_STANDALONE` and `PYTHONPATH`.
+Unlike Windows, `bin/mg5_aMC` is directly executable there — no `.bat` wrapper
+is needed, and the MinGW/f2py workaround in §5 does not apply.
+
+### 4.2 Check what GPU you actually have before planning around it
+
+```bash
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+"$NFI_PY" -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```
+
+The lxplus environment recorded in `PRD.md` Part II had **no GPU**, and its venv
+carries `torch 2.14.1+cpu` — the CPU-only build. So on that machine both checks
+are expected to fail. GPU work needs a GPU node *and* a CUDA-enabled torch.
+
+**Which GPU resource to use is not settled here.** CERN provides GPUs through
+several routes (HTCondor GPU queues, dedicated pools), and the correct one
+depends on your account and the current batch configuration. Confirm the queue
+name and the `request_gpus` syntax with the site before submitting — do not
+assume the values below.
+
+### 4.3 Making torch see a GPU
+
+Only needed on a node that has one. Install the CUDA build of the **same torch
+version** the venv already has, so the `numpy<2` pin stays valid:
+
+```bash
+"$NFI_PY" -m pip install "torch==2.14.1" \
+    --index-url https://download.pytorch.org/whl/cu121
+```
+
+Match the `cuXXX` tag to the node's driver. Verify with the same check as §4.2.
+
+### 4.4 Commands
+
+Identical in structure to §3.2–§3.5 on Windows, with two substitutions: use
+`$NFI_PY` and `$NFI_REPO`, and drop the Windows-only bits. The **working
+directory rule is unchanged and still mandatory** — `lha_read.f` resolves
+`./Cards/` against the CWD and calls a Fortran `stop` (exit status 0, no
+output) if it fails.
+
+```bash
+export REPO="$NFI_REPO"
+export PY="$NFI_PY"
+
+# generate + compile (once per process)
+cd "$REPO"
+PYTHONPATH="$REPO" $PY experiments/setup_madgraph_process.py \
+    --config configs/processes/gg_ttbar.json --mg5 "$NFI_MG5"
+
+# --- everything below runs with CWD inside the standalone ---
+cd "$REPO/generated/gg_ttbar_standalone"
+
+# integrand check
+PYTHONPATH="$REPO" $PY experiments/validate_madgraph_process_integrand.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" --points 500
+
+# train — add --device cuda and drop --no-compile-kernels on a GPU node
+PYTHONPATH="$REPO" $PY -u experiments/run_madgraph_process_conditional_copula.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" \
+    --speed-profile smoke \
+    --output "$REPO/results/gg_ttbar_copula_smoke"
+
+# held-out validation
+PYTHONPATH="$REPO" $PY -u experiments/validate_madgraph_process_integral.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" \
+    --checkpoint "$REPO/results/gg_ttbar_copula_smoke/madgraph_gg_ttbar_2_final_model.pt" \
+    --output "$REPO/results/gg_ttbar_validation_smoke"
+```
+
+`--output` is mandatory here too (see the note in §3.4).
+
+### 4.5 Long runs must go through the batch system
+
+Do **not** run a `thorough` job interactively on lxplus. It holds one CPU core
+for many hours, and the login nodes enforce CPU-usage limits — that is exactly
+what forced this work onto a local machine. `CLAUDE.md` in this repository
+documents the HTCondor setup: `run_batch.sh` plus `sweeps.sub`, submitted with
+the EosSubmit schedd loaded (`module load lxbatch/eossubmit`), every referenced
+file on `/eos`, and one log file per cluster.
+
+### 4.6 The honest expectation for GPU on lxplus
+
+**A GPU there will not make this faster.** The runtime is set by the matrix
+element, which is evaluated single-threaded on the CPU — see §9. Measured
+directly: moving the flow from CPU to an RTX 3060 changed a smoke run from
+303 s to 304 s.
+
+What lxplus actually offers is **cores**. The per-event matrix-element calls are
+independent, so a multiprocessing pool around `log_integrand` should give close
+to linear speedup, and that is a far better use of the machine than a GPU.
+
+---
+
+## 5. The one deviation: how the wrapper was compiled
 
 `compile_libraries()` shells out to MadGraph's makefiles, which are POSIX-only
 (`SHELL = /bin/bash`, `uname -s`, `-Wl,-rpath`, `.so` suffixes) and produce no
@@ -192,7 +430,7 @@ differences seen in §7 for the 8-D process.
 
 ---
 
-## 5. What was NOT changed
+## 6. What was NOT changed
 
 * `configs/processes/*.json` — untouched.
 * the phase-space maps in `madgraph_process_integrand.py` /
@@ -207,7 +445,7 @@ Two small edits were required for Windows only (both no-ops on Linux):
 
 ---
 
-## 6. Integrand validation output
+## 7. Integrand validation output
 
 `validate_madgraph_process_integrand.py --points 300..500`:
 
@@ -226,7 +464,7 @@ For reference, the same check on Linux for `gg_ttbar` gave
 
 ---
 
-## 7. Comparison against `results_public/`
+## 8. Comparison against `results_public/`
 
 **Training budget, stated once and applying to every table below.** The runs in
 `results/` used `--speed-profile smoke` (300 KL steps). The published runs in
@@ -239,7 +477,7 @@ generated matrix element, the phase-space map and the QMC protocol, none of
 which the training budget touches. That is why it is the meaningful
 build-level check.
 
-### 7.1 Sobol column — the build check
+### 8.1 Sobol column — the build check
 
 Compared at the **per-replicate** level (8 replicates × 5 energies = 40 rows
 per process), not just the summary means:
@@ -256,7 +494,7 @@ applied to the 8-D matrix element, and below the precision of the published
 summary. At the summary level all 15 values are identical to every printed
 digit.
 
-### 7.2 Training summaries — `*_final_summary.csv`
+### 8.2 Training summaries — `*_final_summary.csv`
 
 `smoke` (here) vs `thorough` (published), the file each training run writes at
 the end of its budget:
@@ -282,7 +520,7 @@ Three things to read off this table:
 * ESS is uniformly ~10 % lower for `smoke`, with the log-weight spread
   correspondingly ~10–13 % wider.
 
-### 7.3 Held-out NF column — **not** a reproduction, by design
+### 8.3 Held-out NF column — **not** a reproduction, by design
 
 `smoke` models (here) against the published `thorough` models, on fresh samples
 at held-out energies:
@@ -293,7 +531,7 @@ at held-out energies:
 | gg → t t̄ H | 0.797 – 0.917 | 0.959 – 0.987 | 1.54σ |
 | u ū → 4ℓ | 0.806 – 0.865 | 0.927 – 0.941 | 0.42σ |
 
-### 7.4 Two different "ESS" numbers per model
+### 8.4 Two different "ESS" numbers per model
 
 Worth separating, because the two diagnostics differ by a lot — and they differ
 for the **published** models as much as for these. Both columns below are the
@@ -317,7 +555,102 @@ performance (§7.3: 0.806–0.865 vs 0.927–0.941).
 
 ---
 
-## 8. Three things that may be worth a look
+## 9. GPU runs
+
+### 9.1 Measured: the GPU buys nothing on this workload
+
+`gg → t t̄`, `--speed-profile smoke`, identical config, identical budget; the
+only difference is `--device`:
+
+| | CPU | GPU (RTX 3060 Laptop) |
+|---|---:|---:|
+| training wall clock | **303 s** | **304 s** |
+| validation wall clock | — | 208 s |
+| learned graph | 1 edge | 1 edge |
+| final ESS | 0.8054 | 0.8074 |
+| final Î | 2.632163e-08 | 2.647052e-08 |
+
+**0.3 %.** The models are statistically indistinguishable. The Sobol column of
+the GPU validation is still bit-identical to `results_public/` at all five
+energies, so the device does not affect the build-level check.
+
+### 9.2 Why
+
+**(a) The matrix element is the ceiling and it runs on the CPU.** It is
+evaluated one event per Python call:
+
+```python
+for index, event in enumerate(momenta):
+    values[index] = float(self.evaluate(p, self.alpha_s, -1))
+```
+
+The published `gg_ttbar` validation ran 500 000 evaluations in 5.34 s — about
+**93 600/second** — *with the flow already on CUDA*. The matrix-element
+throughput measured on the Windows box, on **one CPU core**, is
+**96 600/second**. The two match, which says the matrix element dominates the
+wall clock whether or not the flow is on a GPU.
+
+**(b) The driver round-trips host↔device every chunk.** From
+`run_madgraph_process_conditional_copula.py`:
+
+```python
+unit_numpy = unit.detach().cpu().double().numpy()          # GPU → host
+for start in range(0, len(unit_numpy), me_chunk):
+    pieces.append(evaluator.log_integrand(...))             # CPU matrix element
+return torch.as_tensor(np.concatenate(pieces), device=unit.device, ...)  # host → GPU
+```
+
+Each chunk of `--me-chunk` (default 512) samples on the GPU, copies to the
+host, evaluates the matrix element on one CPU core, and copies back.
+
+### 9.3 Consequence for the Alpaka port
+
+**Porting the flow to Alpaka cannot deliver a ≥10× throughput gate on this
+architecture** — not because Alpaka is the wrong tool, but because the flow is
+not where the time is. Three routes actually move the number:
+
+1. **Remove the round trip** — co-resident sampling and evaluation. Small
+   change, worth doing regardless.
+2. **Move the matrix element to the GPU** — substantially harder than the flow,
+   and not currently in the proposal's scope. This is where the real 10× lives.
+3. **Benchmark at a multiplicity where the flow dominates** — high jet
+   multiplicity, where the matrix element is relatively cheaper.
+
+Because the gate is defined on total event-generation rate and the matrix
+element is CPU-bound, no amount of Alpaka work on the flow alone will pass it.
+
+**The cheapest real win is CPU-side:** the per-event matrix-element calls are
+independent, so a multiprocessing pool around `log_integrand` should scale
+close to linearly with cores. No Alpaka, no GPU.
+
+### 9.4 Thorough runs — status at shutdown
+
+Three processes were started at `--speed-profile thorough --device cuda`,
+sequentially.
+
+| process | status | result |
+|---|---|---|
+| `gg → t t̄` | **complete**, 5 h 05 min | ESS 0.840708 vs published 0.840604 (rel. 1.2e-04) |
+| `gg → t t̄ H` | **partial, discarded** | KL round 0 of 3, step ~3 000; no checkpoint written |
+| `u ū → 4ℓ` | **not started** | — |
+
+Î for the completed run is 2.635616e-08 GeV⁻² (10.263 pb), against the
+published 2.635498e-08 — a relative difference of 4.5e-05. This is the
+strongest model-level agreement in this document: independent build, different
+Fortran toolchain, different operating system, full training budget.
+
+**The training driver writes its checkpoint only when the run finishes.** There
+are no intermediate checkpoints, so an interrupted process restarts from zero.
+The thorough runs are therefore all-or-nothing and need an uninterrupted block
+of roughly 5 h (2→2), 10–12 h (2→3) and longer for the 8-D process.
+
+`run_thorough_gpu.sh` records the exact invocation. A corrected variant that
+skips the completed process and fixes the `--output` handling is at
+`mg5_scratch/run_thorough_gpu_resume.sh`.
+
+---
+
+## 10. Three things that may be worth a look
 
 Offered as observations from running the code, not as criticisms.
 
