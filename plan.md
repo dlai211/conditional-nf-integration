@@ -51,9 +51,12 @@ eager mode.
 ## 2. The finding that shapes the Alpaka plan
 
 **This is the most important result of the baseline GPU work, and it should
-drive Phase 1 scoping.** It is a measurement, not a prediction.
+drive Phase 1 scoping.** It is a measurement, not a prediction — and it
+**replaces an earlier conclusion in this document**, which said the matrix
+element was the ceiling and the flow was not where the time went. That was
+wrong. The corrected picture is below.
 
-### The GPU buys nothing on this workload
+### The starting observation
 
 `gg→t t̄`, identical config and budget, flow on CPU versus on the RTX 3060:
 
@@ -63,57 +66,80 @@ drive Phase 1 scoping.** It is a measurement, not a prediction.
 | final ESS | 0.8054 | 0.8074 |
 | final Î | 2.632163e-08 | 2.647052e-08 |
 
-0.3 % — inside the run-to-run scatter. The two models are statistically
-indistinguishable.
+0.3 % — the GPU bought nothing. The explanation was not obvious, and the first
+one written here was incorrect.
 
-### Why
+### Where the time actually goes depends on batch size
 
-**(a) The matrix element is the ceiling, and it is on the CPU.** It is evaluated
-one event per Python call:
+Measured with `scripts/profile_flow_vs_matrix_element.py` on the trained
+`gg_ttbar` model: flow sampling + log q + backward, against the matrix element
+on the same points.
 
-```python
-for index, event in enumerate(momenta):
-    values[index] = float(self.evaluate(p, self.alpha_s, -1))
-```
+| points | flow on CPU | flow on GPU | GPU speedup | matrix element | ME share (GPU) |
+|---:|---:|---:|---:|---:|---:|
+| 10 000 | 295 ms | **434 ms** | **0.68×** | 113 ms | 21 % |
+| 30 000 | 735 ms | 520 ms | 1.41× | 321 ms | 38 % |
+| 100 000 | 2 555 ms | **532 ms** | **4.80×** | 1 020 ms | 66 % |
 
-The published `gg_ttbar` validation ran 500 000 evaluations in 5.34 s
-(~93 600/s) *with the flow already on CUDA*. Measured here on **one CPU core**:
-**96 600/s**. Those match, which says the matrix element sets the wall clock
-whether or not the flow is on a GPU.
+Two regimes, and the pipeline currently lives in the first:
 
-**(b) The driver forces a host↔device round trip every chunk.** Each
-`--me-chunk` (default 512) of samples is generated on the GPU, copied to the
-host, evaluated on one CPU core, and copied back. Whatever the GPU wins on the
-flow is spent crossing the bus.
+* **At the default batch sizes** (`TRAIN_BATCH_SIZE = 10 000`, `--gpu-chunk`
+  10 000) the **flow is ~79 % of a training step, and the GPU flow is *slower*
+  than the CPU flow**. The batch is too small to amortise kernel-launch
+  overhead, so the GPU spends its time launching rather than computing. That is
+  the entire explanation for 303 s versus 304 s: not that the flow is cheap, but
+  that the GPU is not being given enough work to do.
+* **At 100 000 points** the same GPU flow runs **4.8× faster** than the CPU one,
+  and the matrix element takes over as the dominant cost (66 %).
 
-Supporting evidence: the same 500 000 evaluations took 26.4–27.1 s here against
-11.2 s in `results_public`. That factor of 2.4 is single-thread CPU throughput,
-not GPU — this box's core is slower than the machine the published timings came
-from.
+So both statements are true at different batch sizes. The earlier conclusion
+quoted the second regime's bottleneck as if it applied to training, and missed
+that the flow was dominating at the batch size training actually uses.
+
+### The batch size is a lever that works today
+
+Same model, same 500 000 evaluations, only `--gpu-chunk` changed 10 000 → 100 000.
+No code change:
+
+| E (GeV) | 10k chunk | 100k chunk | speedup |
+|---:|---:|---:|---:|
+| 400 | 14.17 s | 6.37 s | 2.23× |
+| 650 | 12.29 s | 6.19 s | 1.98× |
+| 1000 | 10.91 s | 6.61 s | 1.65× |
+| 1500 | 11.57 s | 6.01 s | 1.93× |
+| 1950 | 11.42 s | 6.73 s | 1.70× |
 
 ### What this means for Alpaka
 
-**Porting the flow to Alpaka cannot, by itself, deliver the ≥10× throughput
-gate.** Not because Alpaka is the wrong tool, but because the flow is not where
-the time is. Three routes actually move the number:
+**The flow is a real bottleneck** — about 79 % of a training step at the batch
+size the pipeline uses — **but it is overhead-bound, not arithmetic-bound.** The
+GPU already evaluates the arithmetic quickly; it is losing to per-call launch
+and synchronisation costs.
 
-1. **Remove the round trip** — co-resident sampling and evaluation, nothing
-   crossing the bus per chunk. Small change, worth doing regardless.
-2. **Move the matrix element to the GPU** — substantially harder than the flow
-   and not currently in the proposal's scope. This is where the real 10× lives.
-3. **Choose a workload where the flow dominates** — high multiplicity, where
-   the matrix element is relatively cheaper and the phase space harder.
+That is a good position for Alpaka, but a specific one. A straight port would
+inherit the problem: the same sequence of small operations, now in C++, still
+pays per-launch cost. The Alpaka case rests on doing what PyTorch eager cannot —
+**fuse the per-dimension chain into a single kernel launch** so the fixed cost
+per call collapses.
 
-Route 1 is a small change. Route 2 is a decision, because if the gate is defined
-on total event-generation rate and the matrix element is CPU-bound, no amount of
-Alpaka work on the flow will pass it.
+That makes the first experiment well defined: measure the fixed per-call cost of
+the flow, then show a fused kernel removes it. It does not require a full port
+to be informative.
 
-**A cheaper CPU-side win exists, and it has now been measured:** the per-event
-matrix-element calls are independent, so a multiprocessing pool around
-`log_integrand` scales with cores. No Alpaka, no GPU. On this machine (8
-physical cores) a 16-thread pool gives **6× — 614 000 evals/s against 103 000 on
-one core** (§3.4). That, not the serial rate, is the reference the Alpaka work
-has to beat.
+The matrix element still matters, and dominates once the batch is large enough.
+The three routes, with revised weights:
+
+1. **Raise the batch size** — demonstrated: 1.65–2.2× on validation immediately,
+   no code change. Do this regardless.
+2. **Cut the flow's per-call overhead** — Alpaka's target, worth up to the
+   flow's 79 % share.
+3. **Move the matrix element to the device** — matters only after (1) and (2),
+   because at the batch sizes in use it is the smaller share.
+
+**The CPU parallel baseline also stands, but it is smaller than it looked:** a
+16-thread pool gives 6× on the matrix element (§3.4), but that element is only
+~21 % of a step at 10k points, so 6× there is worth ~1.2× overall. Parallelising
+the matrix element is not the shortcut that the flow's share would make it.
 
 ---
 
@@ -159,8 +185,15 @@ Oregon controls.
   it is the innermost per-sample loop, pure arithmetic, no data-dependent
   control flow, and therefore the most tractable first port.
 
-*Acceptance:* one Alpaka kernel, one backend, matched against PyTorch, with the
-discrepancy quantified.
+**The measurement that makes this worth doing** is not the kernel's throughput
+in isolation but the **fixed cost per call** the current implementation pays.
+Time `model.sample()` at 1, 100, 1 000 and 10 000 points: if the cost is nearly
+flat, as the evidence in §2 suggests (142 ms at 512 points, 159 ms at 10 000),
+then the win comes from collapsing calls, not from faster arithmetic. State that
+number before writing the kernel, so the kernel is judged against it.
+
+*Acceptance:* one Alpaka kernel, one backend, matched against PyTorch with the
+discrepancy quantified — **and** a measured before/after on per-call fixed cost.
 
 ### 3.3 Deliverable C — the Python↔C++ boundary
 
@@ -207,13 +240,15 @@ AMD Ryzen 7 6800H (8 physical cores / 16 threads, 45 W laptop part):
 | 16 | **614 298** | **5.96** | 37 % |
 
 Two things follow. First, **the CPU baseline is not 1 core** — a 16-thread pool
-gets ~6× with no GPU and no Alpaka, so any Alpaka speedup must be measured
-against the parallel number, not the serial one. Second, this is a laptop: 8
-physical cores sharing one thermal budget with the GPU. A 32-core server part
-will scale better and at higher per-core clock, so the real reference for the
-gate is faster than 614 000 evals/s. The ≥10× target therefore sits well above
-what this measurement reaches, which is exactly why §2's route 2 (moving the
-matrix element to the device) is the only path that changes the answer.
+gets ~6× with no GPU and no Alpaka, so a speedup must be quoted against the
+parallel number, not the serial one. Second, this is a laptop: 8 physical cores
+sharing one thermal budget with the GPU, so a 32-core server part will scale
+better and at higher per-core clock.
+
+That said, **the matrix-element baseline is not the whole baseline.** At the
+10 000-point batch the pipeline trains at, the matrix element is only ~21 % of a
+step (§2), so 6× on it is worth ~1.2× overall. The parallel number matters for
+the gate definition; it is not where the speedup will come from.
 
 *Acceptance:* met for the CPU side. The flow-side numbers (eager and Alpaka) are
 Phase 2.
@@ -255,10 +290,14 @@ fixed contract: sample, log-density, and the conditioning input. Get that
 agreed before writing kernels, because a kernel written against the wrong
 interface is thrown away.
 
-**5. Write up the GPU non-speedup for the collaboration.** The measurement in
-§2 reframes the throughput work and is not yet in anyone's slide deck. One page,
-the two numbers, the two causes, the three routes — it should reach BNL and
-Brown before Sprint 2 planning, not after.
+**5. Write up the batch-size finding for the collaboration.** §2 has been
+corrected once already: the first reading ("the matrix element is the ceiling")
+was wrong, and the profile shows the flow dominating at the batch sizes in use,
+the GPU flow *losing* to the CPU there, and a 1.65–2.2× end-to-end win from
+raising `--gpu-chunk` alone. One page — the batch-size table, the chunk-size
+table, and the fused-kernel conclusion — should reach BNL and Brown before
+Sprint 2 planning. Sending the corrected version matters more than sending it
+fast.
 
 **6. Fix the "no intermediate checkpoint" problem before the next long run.**
 The 8D thorough run was lost twice — 49 min, then 9 h 20 m — because
@@ -272,12 +311,19 @@ time a job is preempted.
 
 ## 5. Risks worth naming now
 
-**The throughput gate may be defined on a quantity Alpaka cannot improve.**
-§2 is the evidence. If the gate is total event-generation rate and the matrix
-element stays on the CPU, the flow port cannot pass it — not because the port is
-poor, but because the ported component is not the bottleneck. **This is the item
-most worth resolving before Phase 2 scoping**, and it is a collaboration
-decision, not an Oregon one.
+**The flow's cost is dominated by per-call overhead, and a naive port will
+inherit it.** §2 is the evidence: at 10 000 points the GPU flow is *slower* than
+the CPU flow, because the batch is too small to amortise kernel launches. An
+Alpaka reimplementation that keeps the same sequence of small operations will
+reproduce that behaviour in C++. The win has to come from fusing the
+per-dimension chain into one launch — that is the design constraint, not an
+optimisation to add later. **This is worth settling before the port starts.**
+
+**The gate's definition still matters, but less than was thought.**
+A correction to an earlier reading of §2: the flow *is* ~79 % of a training step
+at the batch sizes in use, so a flow-side speedup does move total event rate.
+The remaining ambiguity is quantitative — what the 32-core reference runs and at
+what dimension — not whether the flow is relevant at all.
 
 **The benchmark dimension determines the answer.** Methods of this class do not
 win in low dimension: on a 2D synthetic target, VEGAS beats the flow on both
@@ -319,8 +365,10 @@ spent on stages that do not improve the result.
 
 ## 6. Decisions needed from the collaboration
 
-1. **Is the throughput gate defined on total event-generation rate, or on the
-   flow alone?** This determines whether Portland's Alpaka work can pass it.
+1. **What exactly is the throughput gate measured on?** Total event-generation
+   rate, or the flow alone — and at what multiplicity? §2 shows the flow is
+   ~79 % of a training step at the batch sizes in use, so a flow-side speedup
+   does move the total. The open part is quantitative, not conceptual.
 2. Which repository hosts MANGO code, and the licence/attribution arrangement
    with the upstream `conditional-nf-integration` author.
 3. The exact 32-core CPU reference configuration for the throughput gate — what

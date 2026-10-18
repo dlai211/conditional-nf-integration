@@ -319,25 +319,38 @@ GPU held-out NF results:
 | 1500 | 6.861171 ± 0.0026 | 0.933 | +0.31 |
 | 1950 | 4.7780877 ± 0.0014 | 0.960 | +1.50 |
 
-### 6.2 Why the GPU buys nothing here
+### 6.2 Why the GPU buys nothing here — **corrected**
 
-Two compounding causes, both verified in the code rather than inferred.
+An earlier revision of this section said the matrix element was the ceiling and
+the flow was too cheap to matter. **That was wrong.** A direct profile shows the
+flow is the larger share at the batch sizes the pipeline uses; what is true is
+that the GPU *flow* is not faster than the CPU flow at those batch sizes.
 
-**(a) The matrix element is the ceiling, and it runs on the CPU.** It is
-evaluated one event per Python call:
+Measured with `scripts/profile_flow_vs_matrix_element.py` on the trained
+`gg_ttbar` model (flow sampling + log q + backward against the matrix element on
+the same points):
 
-```python
-for index, event in enumerate(momenta):
-    values[index] = float(self.evaluate(p, self.alpha_s, -1))
-```
+| points | flow on CPU | flow on GPU | GPU speedup | matrix element | ME share (GPU) |
+|---:|---:|---:|---:|---:|---:|
+| 10 000 | 295 ms | **434 ms** | **0.68×** | 113 ms | 21 % |
+| 30 000 | 735 ms | 520 ms | 1.41× | 321 ms | 38 % |
+| 100 000 | 2 555 ms | **532 ms** | **4.80×** | 1 020 ms | 66 % |
 
-The published `gg_ttbar` validation ran 500 000 evaluations in 5.34 s — about
-**93 600/second** — *with the flow already on CUDA*. The matrix-element
-throughput measured on this box, on **one CPU core**, is **96 600/second**.
-Those numbers match, which says the matrix element dominates the wall clock
-whether or not the flow is on a GPU.
+The pipeline trains at `TRAIN_BATCH_SIZE = 10 000` and validates with
+`--gpu-chunk` 10 000 — the first row. There:
 
-**(b) The driver round-trips host↔device every chunk.** From
+* the **flow is ~79 % of the step**, so it is the bottleneck;
+* the **GPU flow is slower than the CPU flow** (434 vs 295 ms), because 10 000
+  points is too little work to amortise kernel-launch overhead. The GPU spends
+  its time launching, not computing.
+
+That is the whole explanation for 303 s versus 304 s. It was never that the flow
+was cheap.
+
+At 100 000 points the same GPU flow is 4.8× faster than the CPU one, and the
+matrix element becomes the dominant cost.
+
+**(b) The driver still round-trips host↔device every chunk.** From
 `run_madgraph_process_conditional_copula.py`:
 
 ```python
@@ -347,25 +360,34 @@ for start in range(0, len(unit_numpy), me_chunk):
 return torch.as_tensor(np.concatenate(pieces), device=unit.device, ...)  # host → GPU
 ```
 
-Each chunk of `--me-chunk` (default 512) samples on the GPU, copies to the
-host, evaluates the matrix element on one CPU core, and copies back. The GPU's
-gain on the flow is spent crossing the bus, and then the CPU does the part that
-actually costs time.
+This is a real cost but a second-order one: it is not what makes the GPU
+unhelpful.
 
-### 6.3 Consequence for the Alpaka port
+### 6.3 Consequence — the batch size is a lever that works today
 
-**Porting the flow to Alpaka cannot deliver a ≥10× throughput gate on this
-architecture** — not because Alpaka is the wrong tool, but because the flow is
-not where the time is. Three routes actually move the number:
+Same model, same 500 000 evaluations, only `--gpu-chunk` changed 10 000 →
+100 000. No code change:
 
-1. remove the round trip (co-resident sampling and evaluation) — small change,
-   worth doing regardless;
-2. move the matrix element to the GPU — substantially harder than the flow, and
-   not currently in the proposal's scope. This is where the real 10× lives;
-3. benchmark at a multiplicity where the flow dominates.
+| E (GeV) | 10k chunk | 100k chunk | speedup |
+|---:|---:|---:|---:|
+| 400 | 14.17 s | 6.37 s | 2.23× |
+| 650 | 12.29 s | 6.19 s | 1.98× |
+| 1000 | 10.91 s | 6.61 s | 1.65× |
+| 1500 | 11.57 s | 6.01 s | 1.93× |
+| 1950 | 11.42 s | 6.73 s | 1.70× |
 
-Because the gate is defined on total event-generation rate, and the matrix
-element is CPU-bound, no amount of Alpaka work on the flow alone will pass it.
+For the Alpaka port:
+
+1. **Raise the batch size first** — 1.65–2.2× for free, and it puts the GPU in
+   the regime where it actually wins.
+2. **Then attack the flow's per-call overhead.** The flow is ~79 % of a step and
+   is overhead-bound, not arithmetic-bound. A straight Alpaka port would inherit
+   the launch cost; the case rests on fusing the per-dimension chain into one
+   kernel launch.
+3. **The matrix element becomes the bottleneck only after both** (66 % at 100k).
+
+The gate is still defined on total event-generation rate, so both components
+matter — but the ordering above is what the measurements support.
 
 ### 6.4 Thorough on GPU
 

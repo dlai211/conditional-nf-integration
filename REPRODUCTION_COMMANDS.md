@@ -604,7 +604,7 @@ performance (§7.3: 0.806–0.865 vs 0.927–0.941).
 
 ## 9. GPU runs
 
-### 9.1 Measured: the GPU buys nothing on this workload
+### 9.1 Measured: the GPU buys nothing at the default batch size
 
 `gg → t t̄`, `--speed-profile smoke`, identical config, identical budget; the
 only difference is `--device`:
@@ -621,21 +621,26 @@ only difference is `--device`:
 the GPU validation is still bit-identical to `results_public/` at all five
 energies, so the device does not affect the build-level check.
 
-### 9.2 Why
+### 9.2 Why — **corrected**
 
-**(a) The matrix element is the ceiling and it runs on the CPU.** It is
-evaluated one event per Python call:
+An earlier revision of this section blamed the matrix element. A direct profile
+shows that is only true at large batch sizes. Measured with
+`scripts/profile_flow_vs_matrix_element.py` on the trained `gg_ttbar` model:
 
-```python
-for index, event in enumerate(momenta):
-    values[index] = float(self.evaluate(p, self.alpha_s, -1))
-```
+| points | flow on CPU | flow on GPU | GPU speedup | matrix element | ME share (GPU) |
+|---:|---:|---:|---:|---:|---:|
+| 10 000 | 295 ms | **434 ms** | **0.68×** | 113 ms | 21 % |
+| 30 000 | 735 ms | 520 ms | 1.41× | 321 ms | 38 % |
+| 100 000 | 2 555 ms | **532 ms** | **4.80×** | 1 020 ms | 66 % |
 
-The published `gg_ttbar` validation ran 500 000 evaluations in 5.34 s — about
-**93 600/second** — *with the flow already on CUDA*. The matrix-element
-throughput measured on the Windows box, on **one CPU core**, is
-**96 600/second**. The two match, which says the matrix element dominates the
-wall clock whether or not the flow is on a GPU.
+The pipeline trains at `TRAIN_BATCH_SIZE = 10 000` and validates at
+`--gpu-chunk` 10 000 — the first row. There the **flow is ~79 % of the step**,
+so it *is* the bottleneck, but the **GPU flow is slower than the CPU flow**:
+10 000 points is too little work to amortise kernel-launch overhead. That is the
+explanation for 303 s versus 304 s.
+
+At 100 000 points the GPU flow is 4.8× faster than the CPU one and the matrix
+element becomes dominant.
 
 **(b) The driver round-trips host↔device every chunk.** From
 `run_madgraph_process_conditional_copula.py`:
@@ -647,28 +652,34 @@ for start in range(0, len(unit_numpy), me_chunk):
 return torch.as_tensor(np.concatenate(pieces), device=unit.device, ...)  # host → GPU
 ```
 
-Each chunk of `--me-chunk` (default 512) samples on the GPU, copies to the
-host, evaluates the matrix element on one CPU core, and copies back.
+Real, but second-order — it is not what makes the GPU unhelpful.
 
-### 9.3 Consequence for the Alpaka port
+### 9.3 Consequence — the batch size is a lever that works today
 
-**Porting the flow to Alpaka cannot deliver a ≥10× throughput gate on this
-architecture** — not because Alpaka is the wrong tool, but because the flow is
-not where the time is. Three routes actually move the number:
+Same model, same 500 000 evaluations, only `--gpu-chunk` changed 10 000 →
+100 000. No code change:
 
-1. **Remove the round trip** — co-resident sampling and evaluation. Small
-   change, worth doing regardless.
-2. **Move the matrix element to the GPU** — substantially harder than the flow,
-   and not currently in the proposal's scope. This is where the real 10× lives.
-3. **Benchmark at a multiplicity where the flow dominates** — high jet
-   multiplicity, where the matrix element is relatively cheaper.
+| E (GeV) | 10k chunk | 100k chunk | speedup |
+|---:|---:|---:|---:|
+| 400 | 14.17 s | 6.37 s | 2.23× |
+| 650 | 12.29 s | 6.19 s | 1.98× |
+| 1000 | 10.91 s | 6.61 s | 1.65× |
+| 1500 | 11.57 s | 6.01 s | 1.93× |
+| 1950 | 11.42 s | 6.73 s | 1.70× |
 
-Because the gate is defined on total event-generation rate and the matrix
-element is CPU-bound, no amount of Alpaka work on the flow alone will pass it.
+For the Alpaka port:
 
-**The cheapest real win is CPU-side:** the per-event matrix-element calls are
-independent, so a multiprocessing pool around `log_integrand` should scale
-close to linearly with cores. No Alpaka, no GPU.
+1. **Raise the batch size first** — 1.65–2.2× for free, and it moves the GPU
+   into the regime where it wins.
+2. **Then attack the flow's per-call overhead.** The flow is ~79 % of a step and
+   overhead-bound, not arithmetic-bound. A straight port inherits the launch
+   cost; the case rests on fusing the per-dimension chain into one kernel.
+3. **The matrix element becomes the bottleneck only after both** (66 % at 100k).
+
+**The CPU-side parallel win is also real but smaller than it looks:** a
+16-thread pool gives 6× on the matrix element (§4.4 measured 103 000 → 614 000
+evals/s), but that element is ~21 % of a step at 10k points, so 6× there is
+worth ~1.2× overall.
 
 ### 9.4 Thorough runs — results
 
