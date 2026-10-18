@@ -348,28 +348,57 @@ export PY="$NFI_PY"
 cd "$REPO"
 PYTHONPATH="$REPO" $PY experiments/setup_madgraph_process.py \
     --config configs/processes/gg_ttbar.json --mg5 "$NFI_MG5"
+```
 
+Then, on a node with a GPU and a CUDA-enabled torch (§4.2, §4.3):
+
+```bash
 # --- everything below runs with CWD inside the standalone ---
 cd "$REPO/generated/gg_ttbar_standalone"
 
-# integrand check
+# integrand check — CPU-side, does not touch the flow
 PYTHONPATH="$REPO" $PY experiments/validate_madgraph_process_integrand.py \
     --config "$REPO/configs/processes/gg_ttbar.json" --points 500
 
-# train — add --device cuda and drop --no-compile-kernels on a GPU node
+# train, smoke, GPU
 PYTHONPATH="$REPO" $PY -u experiments/run_madgraph_process_conditional_copula.py \
     --config "$REPO/configs/processes/gg_ttbar.json" \
-    --speed-profile smoke \
-    --output "$REPO/results/gg_ttbar_copula_smoke"
+    --speed-profile smoke --device cuda \
+    --output "$REPO/results/gg_ttbar_copula_smoke_gpu"
 
-# held-out validation
+# held-out validation, GPU
 PYTHONPATH="$REPO" $PY -u experiments/validate_madgraph_process_integral.py \
     --config "$REPO/configs/processes/gg_ttbar.json" \
-    --checkpoint "$REPO/results/gg_ttbar_copula_smoke/madgraph_gg_ttbar_2_final_model.pt" \
-    --output "$REPO/results/gg_ttbar_validation_smoke"
+    --device cuda \
+    --checkpoint "$REPO/results/gg_ttbar_copula_smoke_gpu/madgraph_gg_ttbar_2_final_model.pt" \
+    --output "$REPO/results/gg_ttbar_validation_smoke_gpu"
 ```
 
-`--output` is mandatory here too (see the note in §3.4).
+Two differences from the CPU block: `--device cuda` is passed explicitly (the
+default is decided at import time by `torch.cuda.is_available()`), and
+`--no-compile-kernels` is dropped so the deterministic integrand kernel can
+compile. `--output` is mandatory here too (see the note in §3.4).
+
+For thorough, change one flag and the output name:
+
+```bash
+PYTHONPATH="$REPO" $PY -u experiments/run_madgraph_process_conditional_copula.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" \
+    --speed-profile thorough --device cuda \
+    --output "$REPO/results/gg_ttbar_copula_thorough_gpu"
+```
+
+**Measured durations** for `--speed-profile thorough --device cuda` on an
+RTX 3060 Laptop GPU, for sizing a batch request:
+
+| process | dim | wall clock |
+|---|---:|---:|
+| `gg → t t̄` | 2 | **5 h 05 min** |
+| `gg → t t̄ H` | 5 | **12 h 26 min** |
+| `u ū → 4ℓ` | 8 | **13 h 15 min** |
+
+These are dominated by the single-threaded CPU matrix-element loop (§9.2), not
+by the GPU. A lxplus GPU node will only beat them if its CPU is faster.
 
 ### 4.5 Long runs must go through the batch system
 
@@ -379,6 +408,24 @@ what forced this work onto a local machine. `CLAUDE.md` in this repository
 documents the HTCondor setup: `run_batch.sh` plus `sweeps.sub`, submitted with
 the EosSubmit schedd loaded (`module load lxbatch/eossubmit`), every referenced
 file on `/eos`, and one log file per cluster.
+
+**Wall time is the thing that will bite you.** `+JobFlavour` is a hard maximum,
+not a reservation, and a thorough run is **all-or-nothing** — the driver writes
+its checkpoint only at the very end, so a kill at the wall time loses the entire
+process. Against the measured durations in §4.4:
+
+| process | measured | minimum flavour |
+|---|---:|---|
+| 2→2 `gg→tt̄` | 5 h 05 min | `workday` (8 h) fits |
+| 2→3 `gg→tt̄H` | 12 h 26 min | **`tomorrow` (24 h)** — `workday` kills it at 8 h |
+| 2→4 `uū→4ℓ` | 13 h 15 min | **`tomorrow` (24 h)** |
+
+This is not hypothetical: `CLAUDE.md` §3.4 records a previous submission killed
+by a `longlunch` (2 h) limit.
+
+The existing `sweeps.sub` requests `request_cpus = 2`, **no GPU**, and queues
+only smoke budgets. A GPU thorough run needs a `request_gpus` line and a
+GPU-capable queue; confirm both with the site before submitting (§4.2).
 
 ### 4.6 The honest expectation for GPU on lxplus
 
@@ -623,34 +670,63 @@ element is CPU-bound, no amount of Alpaka work on the flow alone will pass it.
 independent, so a multiprocessing pool around `log_integrand` should scale
 close to linearly with cores. No Alpaka, no GPU.
 
-### 9.4 Thorough runs — status at shutdown
+### 9.4 Thorough runs — results
 
-Three processes were started at `--speed-profile thorough --device cuda`,
-sequentially.
+Three processes at `--speed-profile thorough --device cuda`, run sequentially on
+an RTX 3060 Laptop GPU.
 
-| process | status | result |
-|---|---|---|
-| `gg → t t̄` | **complete**, 5 h 05 min | ESS 0.840708 vs published 0.840604 (rel. 1.2e-04) |
-| `gg → t t̄ H` | **partial, discarded** | KL round 0 of 3, step ~3 000; no checkpoint written |
-| `u ū → 4ℓ` | **not started** | — |
+| process | status | wall clock | final ESS | Î |
+|---|---|---|---:|---:|
+| `gg → t t̄` | **complete** | 5 h 05 min | 0.840708 | 2.635616e-08 GeV⁻² |
+| `gg → t t̄ H` | **complete** | 12 h 26 min | 0.918134 | 9.698626e-11 |
+| `u ū → 4ℓ` | **complete** | 13 h 15 min | 0.508716 | 3.735308e-11 |
 
-Î for the completed run is 2.635616e-08 GeV⁻² (10.263 pb), against the
-published 2.635498e-08 — a relative difference of 4.5e-05. This is the
-strongest model-level agreement in this document: independent build, different
-Fortran toolchain, different operating system, full training budget.
+**2→2:** ESS 0.840708 against the published 0.840604 (rel. 1.2e-04). Î is
+2.635616e-08 GeV⁻² (10.263 pb) against the published 2.635498e-08 — a relative
+difference of 4.5e-05. This is the strongest model-level agreement in this
+document: independent build, different Fortran toolchain, different operating
+system, full training budget. Held-out validation gives pulls −1.41 / −0.73 /
++1.13 / +0.57 / +1.06 against Sobol with ESS 0.9820–0.9976, the **Sobol column
+bit-identical** to `results_public/gg_ttbar_validation` and the NF column
+agreeing to −0.017 %, −0.003 %, +0.033 %, +0.056 %, +0.023 %.
 
-**The training driver writes its checkpoint only when the run finishes.** There
-are no intermediate checkpoints, so an interrupted process restarts from zero.
-The thorough runs are therefore all-or-nothing and need an uninterrupted block
-of roughly 5 h (2→2), 10–12 h (2→3) and longer for the 8-D process.
+**2→3:** end-to-end validation at all five energies, pulls −0.32 / −0.53 /
+−1.01 / +0.14 / +0.96 against Sobol, with ESS 0.9615–0.9836. The **Sobol column
+is bit-identical** to `results_public/gg_tth_5d_validation`; the NF column
+agrees to −0.004 %, +0.006 %, +0.001 %, +0.033 %, +0.067 %. Table in
+`results/gg_tth_validation_thorough_gpu/summary.csv`.
+
+**2→4:** pulls −2.23 / +0.63 / −0.29 / +0.35 / −0.46 against Sobol, ESS
+0.9286–0.9434. The **Sobol column is bit-identical** to
+`results_public/uu_ww_4l_validation`; the NF column agrees to +0.004 %,
++0.007 %, −0.001 %, −0.009 %, +0.011 %, and the ESS is slightly *higher* than
+the published model at all five energies. Table in
+`results/uu_ww_4l_validation_thorough_gpu/summary.csv`.
+
+The −2.23 pull at 300 GeV is **not** a defect in this build: the published model
+has the same pull (−2.3σ), so both independent models land in the same place and
+the deviation is a property of the model at that energy.
+
+One thing the 2→3 run exposes: the same 500 000 evaluations took **26.4–27.1 s
+here against 11.2 s in `results_public`**, a factor of 2.4. That is the CPU
+matrix-element loop, not the GPU — it is the axis the MANGO throughput gate is
+defined on, and it means a faster CPU node is worth more than a faster GPU here.
+
+**The training driver writes its checkpoint only when the run finishes**, and it
+cannot resume from a saved file either — the checkpoint holds
+`model_state_dict`, `marginal_state_dict`, `graph` and metrics, but no optimizer
+state, RNG state or step position. The thorough runs are therefore
+all-or-nothing: 5 h (2→2), 12.5 h (2→3), 13 h 15 min (2→4) of uninterrupted
+wall clock. The 2→4 run lost 49 min and then 9 h 20 m to interruptions before
+completing on its third attempt.
 
 `run_thorough_gpu.sh` records the exact invocation. A corrected variant that
 skips the completed process and fixes the `--output` handling is at
-`mg5_scratch/run_thorough_gpu_resume.sh`.
+`mg5_scratch/run_thorough_gpu_resume.sh` — use the latter.
 
 ---
 
-## 10. Three things that may be worth a look
+## 10. Four things that may be worth a look
 
 Offered as observations from running the code, not as criticisms.
 
@@ -675,3 +751,20 @@ Offered as observations from running the code, not as criticisms.
    point is that for the 8-D process the summary figure (0.5078) is less than
    half the model's actual held-out performance (0.927 – 0.941), and
    `final_summary.csv` is the file a reader opens first.
+
+4. **The χ² fine-tuning stage never pays for itself.** On all three processes,
+   at the full `chi2_max_steps = 6000` budget:
+
+   | process | ESS entering χ² | χ² best | outcome |
+   |---|---:|---:|---|
+   | 2→2 | 0.840873 | 0.840877 | 4,200 byte-identical steps, then −0.0007 |
+   | 2→3 | 0.917502 | 0.917263 | −0.0002 |
+   | 2→4 | 0.506192 | 0.506192 | **`best step = 0`** — the whole budget discarded |
+
+   The 8-D case is unambiguous: `CHI2 SUMMARY` reports `best step = 0`, so the
+   stage finished by restoring the weights it started with, after ~1 h of
+   compute. Global ESS declined monotonically throughout (0.505483 → 0.505449)
+   while local ESS sat at 0.99, i.e. the objective it optimises was already
+   satisfied. Together with the never-approached `kl_max_steps = 30 000` (all
+   three processes stop at 7 200 by patience), the thorough profile's budgets
+   look substantially over-provisioned.

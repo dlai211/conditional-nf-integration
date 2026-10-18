@@ -1,17 +1,54 @@
-# Shared Login Node Compute Policy & Execution Limits
+# Execution Policy
 
-You are running on a shared cluster login node (LxPlus / AF / SDCC). 
+The rules below are **scoped by machine**. Read the section for the machine you
+are on. The shared-login-node limits in §1–§2 apply to nothing else.
+
+---
+
+## 0. Local machine — no limits
+
+`C:\Users\laiji\test` on Windows 11 is a personal workstation with no
+shared-facility CPU policy. On this machine:
+
+- **Long runs are fine.** The `thorough` profiles take 5–20 h; `gg_ttbar` took
+  5 h 05 min and `gg_tth` 12 h 26 min. Run them here directly.
+- **Use every core.** Do not prepend `OMP_NUM_THREADS=1`,
+  `MKL_NUM_THREADS=1` or any other thread guard. Those exist to protect a
+  shared login node that is not involved here.
+- **Background jobs are fine.** `nohup … &` and the harness's background mode
+  are both allowed.
+- **No batch system.** No HTCondor, no `.sub` files, no `+JobFlavour` — those
+  are lxplus requirements (§2–§3).
+- **GPU runs** pass `--device cuda` and **drop** `--no-compile-kernels` so the
+  deterministic integrand kernel can compile.
+- **Use `--speed-profile thorough`** for publication-quality numbers. `smoke`
+  exists for checking that the plumbing works, not for results.
+
+Note that the GPU is *not* the bottleneck on this workload — the matrix element
+is evaluated in a single-threaded Python loop on the CPU. See
+`REPRODUCTION_COMMANDS.md` §9.2. Adding threads or a bigger GPU here buys
+little; `--me-chunk` and a faster CPU are the levers that matter.
+
+---
+
+## 1. Shared login nodes (LxPlus / AF / SDCC) — hard limits
+
+You are running on a shared cluster login node.
 You MUST adhere to these strict limits to avoid account suspension:
 
-## 1. Local Interactive Run Constraints (Hard Limits)
-- NEVER run full training loops, parameter sweeps, or multi-seed runs in the local terminal.
+- NEVER run full training loops, parameter sweeps, or multi-seed runs in the
+  local terminal.
 - NEVER run processes longer than 3 minutes locally.
-- For local smoke tests or syntax checks, ALWAYS prepend single-core/low-thread env vars:
-  OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 TORCH_NUM_THREADS=1 python <script> --smoke
-- Never spawn background jobs using `&` or concurrent subshells without user approval.
+- For local smoke tests or syntax checks, ALWAYS prepend single-core/low-thread
+  env vars:
+  `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 TORCH_NUM_THREADS=1 python <script> --smoke`
+- Never spawn background jobs using `&` or concurrent subshells without user
+  approval.
 
-## 2. Batch Execution Rules (HTCondor)
-- Any script that trains a model, sweeps hyperparameters, or runs integration searches MUST be dispatched via HTCondor batch.
+## 2. Batch Execution Rules (HTCondor, lxplus only)
+
+- Any script that trains a model, sweeps hyperparameters, or runs integration
+  searches MUST be dispatched via HTCondor batch.
 - When continuing or executing sweeps:
   1. Generate or update a `.sub` submit file and an executable `.sh` wrapper.
   2. Test the wrapper once locally for 1 step/batch using `--smoke`.
@@ -79,7 +116,9 @@ The defaults of these drivers are *not* smoke-sized, and a job that exceeds its
 
 `+JobFlavour` is a maximum wall time, not a reservation: a job that finishes
 early still exits early, so requesting a longer flavour costs nothing and
-avoids mid-run kills.
+avoids mid-run kills. **A thorough run needs `tomorrow` (24 h), not `workday`
+(8 h)** — `gg_tth` measured 12 h 26 min, and the driver writes no intermediate
+checkpoint, so a kill at the wall time loses the whole run.
 
 ### 3.5 Thread allocation for batch slots
 

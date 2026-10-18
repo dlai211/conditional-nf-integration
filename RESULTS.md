@@ -3,8 +3,8 @@
 *What was produced on this machine, and how it compares with the curated
 results in `results_public/`.*
 
-Machine: Windows 11, 16 logical cores, 15 GB RAM, **no GPU**.
-Python 3.10.14 (conda `workspace`), torch 2.3.0+cpu.
+Machine: Windows 11, 16 logical cores, 15 GB RAM, NVIDIA RTX 3060 Laptop GPU
+(6 GB). Python 3.10.14 (conda `workspace`), torch 2.3.0+cu121.
 MadGraph5_aMC@NLO 3.6.7 built locally with the MSYS2 MinGW-w64 toolchain.
 
 ---
@@ -393,6 +393,22 @@ Note this is a much tighter agreement than the smoke model achieved (§4) —
 0.8054 vs 0.8406 there, against 1.2e-04 relative here. Training budget, not the
 build, was the limiting factor, exactly as suspected.
 
+Held-out validation, 500 000 evaluations per energy:
+
+| E (GeV) | NF (pb) | Sobol (pb) | pull | ESS |
+|---:|---|---|---:|---:|
+| 400 | 12.843696 ± 8.9e-04 | 12.844943 ± 1.2e-14 | −1.41 | 0.9976 |
+| 650 | 16.915145 ± 2.0e-03 | 16.916571 ± 1.6e-11 | −0.73 | 0.9934 |
+| 1000 | 11.369921 ± 1.6e-03 | 11.368139 ± 1.3e-13 | +1.13 | 0.9904 |
+| 1500 | 6.861110 ± 1.3e-03 | 6.860368 ± 9.6e-09 | +0.57 | 0.9821 |
+| 1950 | 4.777001 ± 9.1e-04 | 4.776030 ± 9.2e-08 | +1.06 | 0.9820 |
+
+The **Sobol column is bit-identical** to `results_public/gg_ttbar_validation`.
+Against the published NF column: −0.017 %, −0.003 %, +0.033 %, +0.056 %,
++0.023 %. At 400 GeV the two models bracket the true value in opposite
+directions (−1.41σ here, +1.26σ published), which is the expected scatter
+between independent training runs.
+
 #### How the ESS evolved during training
 
 | stage | ESS |
@@ -425,30 +441,140 @@ training one, so the driver fell back to its relative-path default and wrote to
 were moved to `results/gg_ttbar_copula_thorough_gpu/` afterwards; the checkpoint
 and summary are unaffected. The script is corrected for future runs.
 
-#### `gg → t t̄ H` and `u ū → W⁺W⁻ → 4ℓ` — not completed
+#### `gg → t t̄ H` — complete
 
-The sweep was stopped at **18:53 on 2026-10-16** so the machine could be shut
-down.
+Wall clock **12 h 26 min** (21:25:43 → 09:52:10 on 2026-10-17), then 5 min of
+held-out validation.
 
-| process | state when stopped |
-|---|---|
-| `gg → t t̄ H` | KL round 0 of 3, step ~3 000, val NLL −0.734990. **Partial and discarded** — no checkpoint is written until a run finishes. |
-| `u ū → W⁺W⁻ → 4ℓ` | never started |
+| quantity | value |
+|---|---:|
+| learned graph | 10 edges |
+| final ESS | 0.918134 |
+| Î | 9.698626230668e-11 |
+| log Î | −23.056452 |
+| log w std | 0.594390 |
 
-`gg_ttbar`'s result above is complete and unaffected; it was written to disk at
-15:41.
+Held-out validation, 500 000 evaluations per energy:
 
-Runtime observed: `gg_ttbar` ran at 0.5–1.0 s/step and took 5 h 05 min;
-`gg_tth`'s 5-D matrix element runs at 1.5–2.0 s/step, so it was on course for
-roughly 10–12 h, and the 8-D process would be slower again.
+| E (GeV) | NF (pb) | Sobol (pb) | pull | ESS |
+|---:|---|---|---:|---:|
+| 500 | 0.0026853146 ± 4.9e-07 | 0.0026854701 ± 2.1e-09 | −0.32 | 0.9836 |
+| 700 | 0.032118678 ± 5.9e-06 | 0.032121817 ± 5.1e-07 | −0.53 | 0.9833 |
+| 1000 | 0.041191663 ± 8.8e-06 | 0.041200623 ± 1.0e-06 | −1.01 | 0.9777 |
+| 1500 | 0.04242704 ± 1.1e-05 | 0.042425358 ± 5.8e-06 | +0.14 | 0.9703 |
+| 1950 | 0.041285493 ± 1.2e-05 | 0.041272338 ± 7.2e-06 | +0.96 | 0.9615 |
 
-**There are no intermediate checkpoints**, so an interrupted thorough run
-restarts from zero. Any future attempt needs an uninterrupted block for the
-whole process.
+All five pulls are inside ±1.01. The **Sobol column is bit-identical** to
+`results_public/gg_tth_5d_validation` at every energy — the build-level check
+passes for the third process. Against the published NF column:
 
-To resume, run `mg5_scratch/run_thorough_gpu_resume.sh`, which skips the
-completed `gg_ttbar`, trains and validates the remaining two, and fixes the
-`--output` bug described above.
+| E (GeV) | ours | published | rel. diff |
+|---:|---:|---:|---:|
+| 500 | 0.0026853146 | 0.0026854314 | −0.0044 % |
+| 700 | 0.032118678 | 0.032116707 | +0.0061 % |
+| 1000 | 0.041191663 | 0.041191439 | +0.0005 % |
+| 1500 | 0.042427040 | 0.042413176 | +0.033 % |
+| 1950 | 0.041285493 | 0.041257667 | +0.067 % |
+
+Independent training runs, so these are sampling scatter rather than a
+systematic.
+
+**ESS evolution:** bridge 0.874486 → KL round 0 0.913830 → round 1 0.916638 →
+round 2 0.917882 → χ² 0.917263 → final 0.918134. All three KL rounds stopped
+at the 7 200-step patience limit, a quarter of the 30 000-step cap — the same
+over-provisioning seen on `gg_ttbar`, and again the χ² stage did not improve
+ESS.
+
+**Timing:** KL steps ran at **1.75 s/step** (600 steps in 1 051 s). The same
+500 000 evaluations cost **26.4–27.1 s per energy here against 11.2 s in
+`results_public`** — a factor of 2.4, entirely in the CPU matrix-element loop,
+not the GPU.
+
+#### `u ū → W⁺W⁻ → 4ℓ` — complete
+
+Wall clock **13 h 15 min** (22:09:55 on 2026-10-17 → 11:24:50 on 2026-10-18),
+then 5 min of held-out validation. This was the third attempt; the first two
+were lost with no checkpoint (49 min, then 9 h 20 m) — see "Attempts" below.
+
+| quantity | value |
+|---|---:|
+| learned graph | 28 edges (complete DAG) |
+| final ESS | 0.508716 |
+| Î | 3.735308225735e-11 |
+| log Î | −24.0106056841 |
+| log w std | 1.021910 |
+
+Held-out validation, 500 000 evaluations per energy:
+
+| E (GeV) | NF (pb) | Sobol (pb) | pull | ESS |
+|---:|---|---|---:|---:|
+| 300 | 0.052943440 ± 1.8e-05 | 0.052992375 ± 1.2e-05 | −2.23 | 0.9434 |
+| 500 | 0.028254431 ± 1.0e-05 | 0.028236129 ± 2.7e-05 | +0.63 | 0.9402 |
+| 800 | 0.014715634 ± 5.4e-06 | 0.014726234 ± 3.6e-05 | −0.29 | 0.9359 |
+| 1200 | 0.008032969 ± 3.0e-06 | 0.007999827 ± 9.6e-05 | +0.35 | 0.9334 |
+| 1950 | 0.003736164 ± 1.5e-06 | 0.003786851 ± 1.1e-04 | −0.46 | 0.9286 |
+
+The **Sobol column is bit-identical** to `results_public/uu_ww_4l_validation`
+at all five energies. Against the published NF column:
+
+| E (GeV) | ours | published | rel. diff |
+|---:|---:|---:|---:|
+| 300 | 0.052943440 | 0.052941132 | +0.0044 % |
+| 500 | 0.028254431 | 0.028252471 | +0.0069 % |
+| 800 | 0.014715634 | 0.014715797 | −0.0011 % |
+| 1200 | 0.008032969 | 0.008033686 | −0.0089 % |
+| 1950 | 0.003736164 | 0.003735748 | +0.011 % |
+
+ESS is slightly *higher* than the published model at all five energies
+(0.9286–0.9434 against 0.9266–0.9412).
+
+**The 300 GeV pull of −2.23 is not a defect in this build.** The published
+model has the same pull: its 300 GeV estimate sits 5.1e-5 pb below Sobol with a
+combined uncertainty of 2.2e-5, i.e. **−2.3σ**. Both independent models land in
+the same place, so the deviation is a property of the model at that energy, not
+of the reproduction.
+
+**ESS evolution:** bridge 0.469578 → KL round 0 0.502517 → round 1 0.506345 →
+round 2 0.506502 → post-χ² 0.507125 → final 0.508716.
+
+#### The χ² stage selected step 0
+
+`CHI2 SUMMARY` reports **`best step = 0`**: across all 6,000 χ² steps the stage
+never improved on its starting point and finished by restoring the weights it
+began with. Global ESS declined monotonically throughout
+(0.505483 → 0.505449).
+
+That is the third and cleanest instance of the same pattern — on `gg_ttbar` the
+stage was frozen for 4,200 byte-identical steps, on `gg_tth` it cost 0.0002 of
+ESS, and here it discarded its entire budget. `chi2_max_steps = 6000` is not
+being used productively on any of the three processes.
+
+#### Attempts
+
+| attempt | start | ended | duration | outcome |
+|---|---|---|---:|---|
+| 1 | 09:57:50 10-17 | 10:47 10-17 | 49 min | stopped by operator |
+| 2 | 12:31:56 10-17 | 21:52 10-17 | 9 h 20 min | killed by machine restart |
+| 3 | 22:09:55 10-17 | 11:24:50 10-18 | **13 h 15 min** | **complete** |
+
+Attempt 3 reproduced attempt 2's trajectory closely while it lasted — bridge
+ESS 0.469578 vs 0.471382, round 0 ESS 0.502517 vs 0.503910, i.e. 0.3 % apart
+from a different RNG stream.
+
+#### Runtime summary
+
+| process | dim | wall clock | outcome |
+|---|---:|---:|---|
+| `gg → t t̄` | 2 | 5 h 05 min | complete |
+| `gg → t t̄ H` | 5 | 12 h 26 min | complete |
+| `u ū → 4ℓ` | 8 | 13 h 15 min | complete |
+
+**There are no intermediate checkpoints**, and the driver cannot resume even
+from a saved file: the checkpoint carries `model_state_dict`,
+`marginal_state_dict`, `graph` and metrics, but **no optimizer state, RNG state
+or step position**. An interrupted run restarts from zero. On a batch system,
+also request a `+JobFlavour` above the wall time (`REPRODUCTION_COMMANDS.md`
+§4.5).
 
 ---
 
