@@ -29,7 +29,7 @@ three of its LO processes are now trained **and** validated at the full
 |---|---|
 | MadGraph 3.6.7 standalone build chain | working — generate → compile → validate, natively on Windows (MSYS2/MinGW f2py) |
 | LO processes, thorough-trained on GPU | `gg→t t̄` (2D, 5 h 05 min), `gg→t t̄H` (5D, 12 h 26 min), `u ū→W⁺W⁻→4ℓ` (8D, 13 h 15 min) |
-| held-out validation, all three | Sobol column **bit-identical** to `results_public/`; NF column inside the quoted uncertainties |
+| held-out validation, all three | Sobol column reproduces `results_public/` — exact for 2→2 and 2→3, ≤1.1e-15 relative for 2→4; NF column inside the quoted uncertainties |
 | exact-likelihood importance-sampling estimator | working, with ESS/N diagnostics |
 | conditional flow (marginals × copula, conditioned on √ŝ) | working, one model per process across the whole energy range |
 | GPU execution | working end to end (`--device cuda`), and **measured to be no faster** — §2 |

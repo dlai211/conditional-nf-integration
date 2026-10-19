@@ -18,7 +18,7 @@ and how its Python wrapper is compiled**.
 | MadGraph 5 3.6.7 | `C:\Users\laiji\test\MG5_aMC_v3_6_7` |
 | MG5 launcher wrapper | `C:\Users\laiji\test\bin\mg5_aMC.bat` |
 | generated standalones | `C:\Users\laiji\test\conditional-nf-integration\generated\` |
-| Python | conda env `workspace`, Python 3.10.14, CPU-only torch 2.3.0 |
+| Python | conda env `workspace`, Python 3.10.14, torch 2.3.0+cu121 (see `RUNBOOK_GPU.md` §2) |
 | Fortran/compilers | MSYS2 MinGW-w64 at `C:\msys64\mingw64\bin` (gcc/gfortran 14.1.0) |
 | scratch logs | `C:\Users\laiji\test\mg5_scratch\` |
 

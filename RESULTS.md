@@ -7,6 +7,21 @@ Machine: Windows 11, 16 logical cores, 15 GB RAM, NVIDIA RTX 3060 Laptop GPU
 (6 GB). Python 3.10.14 (conda `workspace`), torch 2.3.0+cu121.
 MadGraph5_aMC@NLO 3.6.7 built locally with the MSYS2 MinGW-w64 toolchain.
 
+Commands below assume:
+
+```bash
+export REPO="C:/Users/laiji/test/conditional-nf-integration"
+export PY="/c/Users/laiji/.conda/envs/workspace/python.exe"
+```
+
+Every MadGraph driver runs with the **CWD inside `generated/<proc>_standalone/`**
+— the generated `lha_read.f` resolves `./Cards/` against the CWD — so the `cd`
+is part of each command, not optional.
+
+Each results section below gives the command that produced it, followed by the
+result. Section 3 is the exception: those are the authors' published values, so
+no local command applies.
+
 ---
 
 ## 1. What was completed
@@ -47,6 +62,17 @@ ordinary conda interpreter.
 These numbers are a property of the generated matrix element and phase-space
 map, so they are directly comparable with the Linux session.
 
+**Command** (per process; shown for `gg → t t̄`, repeated with the other two
+configs and standalone directories):
+
+```bash
+cd "$REPO/generated/gg_ttbar_standalone"
+PYTHONPATH="$REPO" "$PY" experiments/validate_madgraph_process_integrand.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" --points 500
+```
+
+**Result**
+
 | quantity | gg_ttbar (2D) | gg_tth (5D) | uu_ww_4l (8D) |
 |---|---:|---:|---:|
 | dimension | 2 | 5 | 8 |
@@ -69,7 +95,11 @@ the Linux figure (47 203 points/s there).
 
 Taken from `results_public/`, produced by the authors with a fully trained
 (`--speed-profile thorough`) model on CUDA. These are the comparison baseline
-for §4.
+for §5.
+
+**No local command applies to this section** — these are the authors' published
+numbers, not our runs. The local commands that produce the same two columns on
+our build are in §5.
 
 ### gg → t t̄ (`results_public/gg_ttbar_validation`)
 
@@ -108,6 +138,24 @@ for §4.
 `experiments/run_madgraph_process_conditional_copula.py --speed-profile smoke`,
 run from inside each `generated/<proc>_standalone/`. Roughly 5 min wall per
 process on 16 CPU cores.
+
+**Command** (CPU smoke; shown for `gg → t t̄`, repeated with `gg_tth` and
+`uu_ww_4l`):
+
+```bash
+cd "$REPO/generated/gg_ttbar_standalone"
+PYTHONPATH="$REPO" "$PY" -u experiments/run_madgraph_process_conditional_copula.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" \
+    --speed-profile smoke \
+    --device cpu \
+    --no-compile-kernels \
+    --output "$REPO/results/gg_ttbar_copula_smoke"
+```
+
+`--device cpu` is explicit: the original runs relied on the then-CPU-only torch
+default, which would now resolve to `cuda`.
+
+**Result**
 
 | process | dim | learned graph | edges | ESS | Î | log w std |
 |---|---:|:---|---:|---:|---:|---:|
@@ -155,6 +203,23 @@ construction and the whole annealing pipeline at once.
 `experiments/validate_madgraph_process_integral.py` with the published
 defaults (`--sobol-power 18 --sobol-replicates 8 --nf-evals 500000
 --seed 20260920`), so the Sobol column is directly comparable.
+
+**Command** (CPU, smoke checkpoints; shown for `gg → t t̄`, repeated per
+process):
+
+```bash
+cd "$REPO/generated/gg_ttbar_standalone"
+PYTHONPATH="$REPO" "$PY" -u experiments/validate_madgraph_process_integral.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" \
+    --device cpu \
+    --checkpoint "$REPO/results/gg_ttbar_copula_smoke/madgraph_gg_ttbar_2_final_model.pt" \
+    --output "$REPO/results/gg_ttbar_validation_smoke"
+```
+
+`--device cpu` is explicit here. When these runs were made, the installed torch
+was CPU-only and the script default resolved to CPU; after the CUDA upgrade the
+default would resolve to `cuda`, which changes the NF column (different RNG
+stream) but not the Sobol column.
 
 ### 5.1 The Sobol column is identical to the published one
 
@@ -289,7 +354,21 @@ replaced with `torch 2.3.0+cu121`; the version is held at 2.3.0 so the
 
 ### 6.1 `gg → t t̄`, smoke — CPU vs GPU
 
+**Command** (GPU; the CPU column is the same command with `--device cpu
+--no-compile-kernels` and the `gg_ttbar_copula_smoke` output directory):
+
+```bash
+cd "$REPO/generated/gg_ttbar_standalone"
+PYTHONPATH="$REPO" "$PY" -u experiments/run_madgraph_process_conditional_copula.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" \
+    --speed-profile smoke \
+    --device cuda \
+    --output "$REPO/results/gg_ttbar_copula_smoke_gpu"
+```
+
 Identical config, identical budget, only `--device` differs:
+
+**Result**
 
 | | CPU | GPU |
 |---|---:|---:|
@@ -341,6 +420,18 @@ The KL batch is `--is-points × ADAPTIVE_CONDITIONS_PER_STEP (256)`:
 Profiled flow cost (sample + log q + backward) against the matrix element on the
 same points, with `scripts/profile_flow_vs_matrix_element.py`:
 
+**Command** (one run per points value: 10 000, 30 000, 100 000):
+
+```bash
+cd "$REPO/generated/gg_ttbar_standalone"
+PYTHONPATH="$REPO" "$PY" scripts/profile_flow_vs_matrix_element.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" \
+    --checkpoint "$REPO/results/gg_ttbar_copula_thorough_gpu/madgraph_gg_ttbar_2_final_model.pt" \
+    --device cuda --points 10000
+```
+
+**Result**
+
 | points | flow on CPU | flow on GPU | GPU speedup | matrix element | ME share (GPU) |
 |---:|---:|---:|---:|---:|---:|
 | 10 000 | 295 ms | **434 ms** | **0.68×** | 113 ms | 21 % |
@@ -361,8 +452,25 @@ about thorough training.** The original note generalised it incorrectly.
 
 ### 6.3 End-to-end check at the thorough batch
 
+**Command** (run once per device; GPU form shown):
+
+```bash
+cd "$REPO/generated/gg_ttbar_standalone"
+PYTHONPATH="$REPO" "$PY" -u experiments/run_madgraph_process_conditional_copula.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" \
+    --speed-profile smoke \
+    --is-points 128 \
+    --device cuda \
+    --output "$REPO/results/gg_ttbar_is128_smoke_cuda"
+```
+
+For the CPU column, replace `--device cuda` with `--device cpu
+--no-compile-kernels` and the output with `gg_ttbar_is128_smoke_cpu`.
+
 Smoke with `--is-points 128`, giving KL batch 32 768 — the value thorough uses —
 CPU versus GPU, sequential:
+
+**Result**
 
 | KL batch | CPU | GPU | speedup | final ESS |
 |---:|---:|---:|---:|---:|
@@ -375,7 +483,7 @@ run spends most of its wall clock outside the KL loop. A definitive end-to-end
 number needs a thorough CPU run (about 5 h), which has not been done; on the
 evidence above, expect something between 1.06× and 1.4×.
 
-**(b) The driver still round-trips host↔device every chunk.** From
+**A second, smaller cost: the driver round-trips host↔device every chunk.** From
 `run_madgraph_process_conditional_copula.py`:
 
 ```python
@@ -391,6 +499,21 @@ This is a real cost but a second-order one.
 
 Same model, same 500 000 evaluations, only `--gpu-chunk` changed 10 000 →
 100 000. No code change:
+
+**Command** (100k chunk; the 10k column is the same command with
+`--gpu-chunk 10000`, the default):
+
+```bash
+cd "$REPO/generated/gg_ttbar_standalone"
+PYTHONPATH="$REPO" "$PY" -u experiments/validate_madgraph_process_integral.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" \
+    --device cuda \
+    --checkpoint "$REPO/results/gg_ttbar_copula_thorough_gpu/madgraph_gg_ttbar_2_final_model.pt" \
+    --gpu-chunk 100000 \
+    --output "$REPO/results/gg_ttbar_validation_chunk100k"
+```
+
+**Result**
 
 | E (GeV) | 10k chunk | 100k chunk | speedup |
 |---:|---:|---:|---:|
@@ -418,6 +541,28 @@ matter — but the ordering above is what the measurements support.
 All three processes at `--speed-profile thorough --device cuda`, run
 sequentially, writing to `results/<proc>_copula_thorough_gpu/` and
 `results/<proc>_validation_thorough_gpu/`.
+
+**Commands** (per process; shown for `gg → t t̄`):
+
+```bash
+cd "$REPO/generated/gg_ttbar_standalone"
+PYTHONPATH="$REPO" "$PY" -u experiments/run_madgraph_process_conditional_copula.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" \
+    --speed-profile thorough \
+    --device cuda \
+    --output "$REPO/results/gg_ttbar_copula_thorough_gpu"
+
+PYTHONPATH="$REPO" "$PY" -u experiments/validate_madgraph_process_integral.py \
+    --config "$REPO/configs/processes/gg_ttbar.json" \
+    --device cuda \
+    --checkpoint "$REPO/results/gg_ttbar_copula_thorough_gpu/madgraph_gg_ttbar_2_final_model.pt" \
+    --output "$REPO/results/gg_ttbar_validation_thorough_gpu"
+```
+
+The sweep was driven by `mg5_scratch/run_thorough_gpu_resume.sh`. The
+`gg_ttbar` training run predates the `--output` fix, so its files were moved
+into `results/gg_ttbar_copula_thorough_gpu/` afterwards; the checkpoint and
+summary are unaffected.
 
 #### `gg → t t̄` — the published thorough model, reproduced
 
@@ -560,8 +705,10 @@ Held-out validation, 500 000 evaluations per energy:
 | 1200 | 0.008032969 ± 3.0e-06 | 0.007999827 ± 9.6e-05 | +0.35 | 0.9334 |
 | 1950 | 0.003736164 ± 1.5e-06 | 0.003786851 ± 1.1e-04 | −0.46 | 0.9286 |
 
-The **Sobol column is bit-identical** to `results_public/uu_ww_4l_validation`
-at all five energies. Against the published NF column:
+The **Sobol column agrees** with `results_public/uu_ww_4l_validation` to
+**≤1.1e-15 relative** at all five energies (34 of 40 replicate values identical
+as stored; the other six differ in the 16th significant digit). Against the
+published NF column:
 
 | E (GeV) | ours | published | rel. diff |
 |---:|---:|---:|---:|

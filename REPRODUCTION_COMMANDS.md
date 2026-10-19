@@ -28,6 +28,10 @@ all match. That is what this file is for checking.
 | torch | 2.3.0+cpu |
 | f2py | from numpy 1.26.4 |
 
+> This table records the environment that produced the **CPU** reproduction on
+> 2026-10-10. GPU runs (§4, §9) use the same machine after the torch upgrade in
+> §3.1(e), on an RTX 3060 Laptop GPU with 6 GB.
+
 ---
 
 ## 2. The command card sent to MadGraph
@@ -121,6 +125,23 @@ pip install --only-binary :all: vegas
 compiled against NumPy 1.x. With a newer torch the pin is unnecessary — see
 `requirements.txt`.
 
+**Verify the GPU before trusting any timing** — `torch.__version__` must carry
+a CUDA tag (`2.3.0+cu121` here), not `+cpu`:
+
+```bash
+"$PY" scripts/verify_torch_gpu.py
+```
+
+It checks the wheel tag, device visibility, device-memory allocation, CPU vs
+GPU matmul throughput, and finally runs the trained conditional marginal on
+both devices, requiring float64 parity. Last run: RTX 3060 Laptop, 18.1× on a
+4096² float32 matmul and 3.6× on the marginal at batch 65,536, with
+`max |x_cuda - x_cpu| = 2.0e-15`.
+
+Do **not** run from the base Anaconda Python: its user site-packages holds
+`torch 2.3.0+cpu`, which is both CPU-only and broken (`shm.dll` fails to load).
+Every command in this document uses the `workspace` interpreter above.
+
 **(b) MinGW Fortran toolchain** — from a MSYS2 shell:
 
 ```bash
@@ -151,9 +172,12 @@ set "PATH=C:\msys64\usr\bin;C:\msys64\mingw64\bin;%PATH%"
 
 MSYS2 goes on `PATH` because MG5 hard-requires `gzip` at startup.
 
-**(e) CUDA-enabled torch, for GPU runs only.** The conda env ships
-`torch 2.3.0+cpu` — the CPU-only build — so `torch.cuda.is_available()` returns
-`False` and every run silently falls back to CPU:
+**(e) CUDA-enabled torch, for GPU runs.** The conda env *originally* shipped
+`torch 2.3.0+cpu` — the CPU-only build — so `torch.cuda.is_available()`
+returned `False` and every run silently fell back to CPU. It has since been
+upgraded to `2.3.0+cu121`; that is the installed state as of 2026-10-19, and
+`scripts/verify_torch_gpu.py` confirms it (see §3.1(a)). Run the command below
+if the environment is ever rebuilt:
 
 ```bash
 "$PY" -m pip install "torch==2.3.0+cu121" \
@@ -533,13 +557,13 @@ per process), not just the summary means:
 |---|---|---:|---|
 | gg → t t̄ | `gg_ttbar_validation` | **40 / 40** | 0 |
 | gg → t t̄ H | `gg_tth_5d_validation` | **40 / 40** | 0 |
-| u ū → 4ℓ | `uu_ww_4l_validation` | 38 / 40 | 1.0e-16 abs (6.9e-15 rel) |
+| u ū → 4ℓ | `uu_ww_4l_validation` | 34 / 40 | 3.7e-15 rel |
 
-The two differing `uu_ww_4l` replicates are at 800 GeV (replicate 1) and
-differ in the 16th significant digit — consistent with a different optimiser
-applied to the 8-D matrix element, and below the precision of the published
-summary. At the summary level all 15 values are identical to every printed
-digit.
+Six `uu_ww_4l` replicates differ (800 GeV reps 1, 2, 6; 1200 GeV rep 4;
+1950 GeV reps 0 and 7), in the 16th significant digit — consistent with a
+different optimiser applied to the 8-D matrix element, and at or below the
+precision of the published summary. At the summary level the worst difference
+is 1.1e-15 relative; the other 12 of 15 values are exact.
 
 ### 8.2 Training summaries — `*_final_summary.csv`
 
@@ -722,8 +746,8 @@ agrees to −0.004 %, +0.006 %, +0.001 %, +0.033 %, +0.067 %. Table in
 `results/gg_tth_validation_thorough_gpu/summary.csv`.
 
 **2→4:** pulls −2.23 / +0.63 / −0.29 / +0.35 / −0.46 against Sobol, ESS
-0.9286–0.9434. The **Sobol column is bit-identical** to
-`results_public/uu_ww_4l_validation`; the NF column agrees to +0.004 %,
+0.9286–0.9434. The **Sobol column agrees** with
+`results_public/uu_ww_4l_validation` to ≤1.1e-15 relative; the NF column agrees to +0.004 %,
 +0.007 %, −0.001 %, −0.009 %, +0.011 %, and the ESS is slightly *higher* than
 the published model at all five energies. Table in
 `results/uu_ww_4l_validation_thorough_gpu/summary.csv`.

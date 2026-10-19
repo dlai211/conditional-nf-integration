@@ -21,11 +21,23 @@ The ~1.6 GB held by the desktop is not available to us. Anything sized close to
 
 ---
 
-## 2. Prerequisite: a CUDA-enabled torch
+## 2. A CUDA-enabled torch — **already installed**
 
-The conda `workspace` environment shipped `torch 2.3.0+cpu`, which is the
+The `workspace` environment originally carried `torch 2.3.0+cpu`, which is the
 CPU-only build — `torch.cuda.is_available()` returns `False` and the engine
-silently falls back to CPU. This must be replaced:
+silently falls back to CPU. It has since been replaced. Current state, verified
+on 2026-10-19:
+
+| check | value |
+|---|---|
+| `torch.__version__` | `2.3.0+cu121` |
+| `torch.version.cuda` | 12.1 |
+| `torch.cuda.is_available()` | `True` |
+| device | NVIDIA GeForce RTX 3060 Laptop GPU |
+| capability | 8.6 |
+
+If the environment is rebuilt, install the CUDA wheel explicitly — do not let a
+plain `pip install torch` choose, since the PyPI Windows default is CPU-only:
 
 ```bash
 /c/Users/laiji/.conda/envs/workspace/python.exe -m pip install \
@@ -40,6 +52,11 @@ driver, so cu121 is the safe choice and cu124 is a needless risk.
 **Why the same torch version:** pinning to 2.3.0 keeps the `numpy<2`
 requirement from `RUNBOOK.md` §2.1 valid. Torch 2.3 is compiled against NumPy
 1.x; changing the torch version would reopen that question.
+
+**A second, unrelated trap:** the PATH default
+(`C:\ProgramData\anaconda3\python.exe`) has `torch 2.3.0+cpu` in its user
+site-packages, and it does not even import (`shm.dll` fails to load). No
+command in this repository uses it; always invoke `$PY` explicitly.
 
 The download is several GB — the torch wheel plus the `nvidia-*` runtime wheels
 (cuDNN, cuBLAS, cuSPARSE). Budget 10–30 minutes depending on the connection.
@@ -67,13 +84,28 @@ print('device         ', torch.cuda.get_device_name(0) if torch.cuda.is_availabl
 free, total = torch.cuda.mem_get_info()
 print('vram free/total: %.2f / %.2f GiB' % (free/2**30, total/2**30))
 x = torch.randn(1024, 1024, device='cuda')
-print('matmul ok      ', float((x @ x).sum()) == float((x @ x).sum()))
+print('matmul device  ', (x @ x).device)
 "
 ```
 
-All three of these must hold: `cuda available True`, a device name, and the
-matmul round-trip. If `cuda available` is still `False` after the install, the
-torch build did not take — check with `$PY -m pip show torch`.
+`cuda available` must be `True`, a device name must print, and `matmul device`
+must be `cuda:0`. If availability is still `False` after the install, the torch
+build did not take — check `$PY -m pip show torch`.
+
+That check only proves a tensor can be created. The full proof is
+`scripts/verify_torch_gpu.py`, which also allocates device memory, times a
+4096² matmul on both devices, runs the trained conditional marginal on both and
+requires float64 parity, and backpropagates through it. Last run on this
+machine:
+
+| check | result |
+|---|---|
+| matmul, 4096² float32 | 18.1× faster on GPU (379 ms → 21 ms) |
+| conditional marginal, batch 65,536 | 3.6× faster on GPU (126 ms → 35 ms) |
+| max \|x_cuda − x_cpu\| | 2.0e-15 |
+| gradient device | `cuda:0` |
+
+Its exit status is non-zero if any check fails, so it can gate a CI job.
 
 ---
 
@@ -123,7 +155,7 @@ Sobol reproduction check meaningful.
 | `--device` | `cpu` (or omitted) | **`cuda`** — worth passing explicitly, since the default is decided at import time by `torch.cuda.is_available()` |
 | `--no-compile-kernels` | **passed** (the kernel-compile path is CUDA-only) | **drop it** — on GPU the deterministic integrand kernel *can* compile, and that is the point |
 | output dirs | `results/<proc>_copula_smoke` | `results/<proc>_copula_smoke_gpu` |
-| expected wall-clock | minutes | **see §6 — do not expect it to be much faster** |
+| expected wall-clock | minutes | **smoke: about the same; thorough: modestly faster — see §6** |
 
 Kernel compilation needs a C++ toolchain. MSVC 2022 BuildTools is on this
 machine's `PATH`, so it should work; if compilation fails, the run still
@@ -136,7 +168,7 @@ proceeds on the eager path, and `--no-compile-kernels` is the escape hatch.
 **This is the most important section in this file.** It is a measurement, not a
 prediction.
 
-### Measured: the GPU buys nothing on this workload
+### Measured: the GPU buys nothing on the **smoke** profile
 
 `gg_ttbar`, `--speed-profile smoke`, identical config and budget:
 
@@ -150,6 +182,22 @@ prediction.
 **0.3 % — i.e. nothing.** The two models are statistically indistinguishable
 (same graph, ESS within 0.25 %, Î within 0.6 %; the residual scatter is just a
 different training trajectory, since the RNG stream differs by device).
+
+**This is a smoke result and it does not generalise.** Smoke runs at KL batch
+8 192, below the crossover where kernel launches amortise. Subsequent
+measurements (`RESULTS.md` §6.2–6.3) put the picture right:
+
+| measurement | result |
+|---|---|
+| smoke at KL batch 32 768 (thorough's value) | 388 s CPU vs 365 s GPU, **1.06×** |
+| flow alone at 30 000 points | **1.41×** faster on GPU |
+| flow alone at 100 000 points | **4.80×** faster on GPU |
+| validation, `--gpu-chunk` 10k → 100k | **1.65–2.23×**, no code change |
+
+The correct statement is: **the GPU is launch-bound below roughly 30 000 points
+and wins above it; once the flow is accelerated, the CPU matrix element becomes
+the end-to-end ceiling.** The thorough runs (§9) have since been completed and
+confirm the models still reproduce the published numbers.
 
 The Sobol column of the GPU validation is still **bit-identical** to
 `results_public/gg_ttbar_validation` at all five energies, so moving the flow to
@@ -186,23 +234,41 @@ host, evaluates the matrix element on one CPU core, and copies back. Whatever
 the GPU wins on the flow is spent crossing the bus, and then the CPU does the
 part that actually costs time.
 
-### What this means for the Alpaka port
+### What this means for the Alpaka port — now measured
 
-**Porting the flow to Alpaka cannot deliver a ≥10× throughput gate on this
-architecture.** Not because Alpaka is the wrong tool, but because the flow is
-not where the time is. Three routes actually move the number:
+The original text here said an Alpaka port "cannot deliver a ≥10× throughput
+gate." That was wrong about the flow. Fusing the per-dimension spline chain
+into one kernel launch removes the per-call overhead that kept the PyTorch
+marginal flat at ~32 ms. One marginal per call, `float32`, both sides on the
+GPU (`mango-alpaka`, `RESULTS.md` §2):
 
-1. **Remove the round trip** — co-resident sampling and evaluation, nothing
-   crossing the bus per chunk. Cheap, and worth doing regardless.
+| N | forward | inverse |
+|---:|---:|---:|
+| 1 | 10.4× | **254×** |
+| 1 000 | 7.1× | **176×** |
+| 10 000 | 1.3× | **33×** |
+| 50 000 | 0.6× | **12.7×** |
+
+The inverse — the direction the sampler uses — clears 10× at every batch size
+measured. The forward loses above ~10 000 points to the host→device copy of
+`raw`; a device-pointer interface would remove that.
+
+What remains true is the end-to-end caveat: ≥10× on the flow does not become
+≥10× on total event-generation rate while the matrix element runs on one CPU
+core. Three routes still move that number:
+
+1. **Remove the round trip** — co-resident sampling and evaluation. Validation
+   already gained 1.65–2.23× just by raising `--gpu-chunk`; the training
+   driver still copies every chunk.
 2. **Move the matrix element to the GPU** — a substantially harder problem than
    the flow, and not currently in the proposal's scope. This is where the real
    10× lives.
 3. **Choose a workload where the flow dominates** — high multiplicity, where
    the matrix element is relatively cheaper and the phase space harder.
 
-Route 1 is a small change. Route 2 needs a decision, because if the gate is
-defined on total event-generation rate and the matrix element is CPU-bound, no
-amount of Alpaka work on the flow will pass it.
+Route 2 needs a decision: if the gate is defined on total event-generation rate
+and the matrix element is CPU-bound, no amount of Alpaka work on the flow alone
+will pass it.
 
 ### Practical knobs
 
@@ -231,16 +297,16 @@ suffix; until it does, prefer the explicit commands in §4.
 
 With ~4.3 GB usable:
 
-| setting | smoke | thorough (later) |
+| setting | smoke | thorough |
 |---|---:|---:|
 | `marginal_train_conditions` | 32 | **1024** |
 | `final_ess_size` | 5 000 | **100 000** |
 | `batch_size` (cap) | 2048 | larger |
 
-Smoke should fit comfortably. **Thorough will not fit at the default chunk
-sizes** — `final_ess_size = 100 000` alone is 20× the smoke evaluation, and the
-number of training conditions rises 32×. Expect to need `--gpu-chunk` reduced
-from its default of 10 000, and to run the evaluation in more, smaller chunks.
+Smoke fits comfortably. The thorough runs (§9) also completed on this card at
+the recorded chunk sizes (`gpu_chunk = 10 000` in the validation configs), so
+the earlier prediction that thorough would not fit was too pessimistic. They
+are long, not impossible: 5–13 h per process.
 
 If you hit `torch.cuda.OutOfMemoryError`: lower `--gpu-chunk` first (it is the
 per-forward batch), then `--uniform-fraction`-adjacent batch settings. Setting
@@ -249,15 +315,19 @@ fragmentation on a 6 GB card.
 
 ---
 
-## 9. For the thorough runs (later, not now)
+## 9. Thorough runs — completed
 
-Once smoke is verified on GPU, the thorough profile is a flag change —
-`--speed-profile thorough` — plus the VRAM work in §8. Two things to note
-before starting one:
+This section was written as "later, not now"; the runs were done on
+2026-10-17/18. Wall clocks: `gg_ttbar` **5 h 05 m**, `gg_tth` **12 h 26 m**,
+`uu_ww_4l` **13 h 15 m**, all at `--speed-profile thorough --device cuda`, with
+held-out validation per energy. Results are in
+`results/<proc>_copula_thorough_gpu/` and
+`results/<proc>_validation_thorough_gpu/`; the numbers are in `RESULTS.md`
+§6.5. Notes for a rerun:
 
-* Thorough is roughly 100× the KL budget of smoke. On this GPU that is likely
-  **hours per process**, and it will hold the GPU (and the desktop) for the
-  duration.
+* Thorough is roughly 100× the KL budget of smoke. On this GPU that is
+  **5–13 hours per process** (measured), and it holds the GPU — and the
+  desktop — for the duration.
 * The `_smoke` vs `_thorough` and `_cpu` vs `_gpu` distinctions should stay in
   the output directory names, because the whole point of these runs is
   comparison — against the CPU runs here and against `results_public/`.
@@ -273,8 +343,9 @@ export PY="/c/Users/laiji/.conda/envs/workspace/python.exe"
 # 1. GPU present?
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv
 
-# 2. torch sees it?
+# 2. torch sees it — and prove it is really executing there
 $PY -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+$PY scripts/verify_torch_gpu.py
 
 # 3. train (smoke, GPU) — note: NO --no-compile-kernels
 cd "$REPO/generated/gg_ttbar_standalone"

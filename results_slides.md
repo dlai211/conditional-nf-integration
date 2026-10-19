@@ -82,7 +82,7 @@ held-out validation is much higher.
 
 ---
 
-# The build check: Sobol is bit-identical
+# The build check: Sobol reproduces
 
 Two columns in every validation table, and they mean different things:
 
@@ -91,7 +91,9 @@ Two columns in every validation table, and they mean different things:
 | **Sobol QMC** | **no** | the build — phase space, Jacobian, matrix element |
 | **NF estimate** | yes (RNG differs) | the model — how well training converged |
 
-**All three processes: the Sobol column is bit-identical to `results_public`.**
+**All three processes: the Sobol column reproduces `results_public`** — 114 of
+120 replicate integrals identical as stored; the rest differ by ≤3.7e-15
+relative (the last printed digit).
 
 NF column agrees to 0.004 – 0.067 % (independent training runs → sampling scatter).
 
