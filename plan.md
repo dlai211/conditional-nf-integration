@@ -81,22 +81,38 @@ on the same points.
 | 30 000 | 735 ms | 520 ms | 1.41× | 321 ms | 38 % |
 | 100 000 | 2 555 ms | **532 ms** | **4.80×** | 1 020 ms | 66 % |
 
-Two regimes, and the pipeline currently lives in the first:
+**Which row applies depends on the profile**, because the KL batch is
+`--is-points × 256`, not `--batch-size` — a flag name that misleads:
 
-* **At the default batch sizes** (`TRAIN_BATCH_SIZE = 10 000`, `--gpu-chunk`
-  10 000) the **flow is ~79 % of a training step, and the GPU flow is *slower*
-  than the CPU flow**. The batch is too small to amortise kernel-launch
-  overhead, so the GPU spends its time launching rather than computing. That is
-  the entire explanation for 303 s versus 304 s: not that the flow is cheap, but
-  that the GPU is not being given enough work to do.
-* **At 100 000 points** the same GPU flow runs **4.8× faster** than the CPU one,
-  and the matrix element takes over as the dominant cost (66 %).
+| profile | is-points | **KL batch** |
+|---|---:|---:|
+| smoke | 32 | **8 192** |
+| thorough | 128 | **32 768** |
 
-So both statements are true at different batch sizes. The earlier conclusion
-quoted the second regime's bottleneck as if it applied to training, and missed
-that the flow was dominating at the batch size training actually uses.
+* **Smoke** sits below the crossover: the GPU flow is *slower* than the CPU one,
+  because 8 192 points is too little work to amortise kernel launches. That is
+  why the original 303 s / 304 s comparison showed nothing — it was a smoke run.
+* **Thorough** sits above it: the GPU flow is ~1.4× faster and the matrix element
+  is ~38 % of the step.
 
-### The batch size is a lever that works today
+**"The GPU buys nothing" was a statement about the smoke profile.** It was
+generalised to training in an earlier revision of this plan, which was wrong.
+
+### End-to-end check at the thorough batch
+
+Smoke with `--is-points 128` (KL batch 32 768, the thorough value), CPU vs GPU:
+
+| KL batch | CPU | GPU | speedup | final ESS |
+|---:|---:|---:|---:|---:|
+| 8 192 (smoke default) | 303 s | 304 s | 1.00× | 0.8054 / 0.8074 |
+| 32 768 (thorough value) | 388 s | 365 s | **1.06×** | 0.8086 / 0.8099 |
+
+The GPU does start to help, but 1.06× is far below the 1.4× the profiler gives
+the KL stage alone, because a smoke run spends most of its time outside the KL
+loop. A thorough CPU run (~5 h) would settle the end-to-end number; it has not
+been run.
+
+### The validation path has a free win
 
 Same model, same 500 000 evaluations, only `--gpu-chunk` changed 10 000 → 100 000.
 No code change:
@@ -111,10 +127,11 @@ No code change:
 
 ### What this means for Alpaka
 
-**The flow is a real bottleneck** — about 79 % of a training step at the batch
-size the pipeline uses — **but it is overhead-bound, not arithmetic-bound.** The
-GPU already evaluates the arithmetic quickly; it is losing to per-call launch
-and synchronisation costs.
+**The flow is a real bottleneck** — the larger share of a step at both profiles'
+batch sizes, and ~62 % at the thorough KL batch — **but it is overhead-bound,
+not arithmetic-bound.** The GPU already evaluates the arithmetic quickly; at
+smoke's batch it loses outright to per-call launch and synchronisation costs,
+and at thorough's batch it wins only ~1.4× on the stage.
 
 That is a good position for Alpaka, but a specific one. A straight port would
 inherit the problem: the same sequence of small operations, now in C++, still
@@ -132,7 +149,7 @@ The three routes, with revised weights:
 1. **Raise the batch size** — demonstrated: 1.65–2.2× on validation immediately,
    no code change. Do this regardless.
 2. **Cut the flow's per-call overhead** — Alpaka's target, worth up to the
-   flow's 79 % share.
+   flow's share of the step (~62 % at the thorough KL batch).
 3. **Move the matrix element to the device** — matters only after (1) and (2),
    because at the batch sizes in use it is the smaller share.
 
@@ -312,18 +329,17 @@ time a job is preempted.
 ## 5. Risks worth naming now
 
 **The flow's cost is dominated by per-call overhead, and a naive port will
-inherit it.** §2 is the evidence: at 10 000 points the GPU flow is *slower* than
-the CPU flow, because the batch is too small to amortise kernel launches. An
-Alpaka reimplementation that keeps the same sequence of small operations will
-reproduce that behaviour in C++. The win has to come from fusing the
-per-dimension chain into one launch — that is the design constraint, not an
+inherit it.** §2 is the evidence: at smoke's KL batch (8 192 points) the GPU
+flow is *slower* than the CPU flow, and at thorough's (32 768) it wins only
+~1.4×. An Alpaka reimplementation that keeps the same sequence of small
+operations will reproduce that behaviour in C++. The win has to come from fusing
+the per-dimension chain into one launch — that is the design constraint, not an
 optimisation to add later. **This is worth settling before the port starts.**
 
-**The gate's definition still matters, but less than was thought.**
-A correction to an earlier reading of §2: the flow *is* ~79 % of a training step
-at the batch sizes in use, so a flow-side speedup does move total event rate.
-The remaining ambiguity is quantitative — what the 32-core reference runs and at
-what dimension — not whether the flow is relevant at all.
+**The gate's definition still matters, but less than was thought.** The flow is
+the larger share of a step at both profiles' batch sizes, so a flow-side speedup
+does move total event rate. The remaining ambiguity is quantitative — what the
+32-core reference runs and at what dimension — not whether the flow is relevant.
 
 **The benchmark dimension determines the answer.** Methods of this class do not
 win in low dimension: on a 2D synthetic target, VEGAS beats the flow on both
@@ -366,9 +382,9 @@ spent on stages that do not improve the result.
 ## 6. Decisions needed from the collaboration
 
 1. **What exactly is the throughput gate measured on?** Total event-generation
-   rate, or the flow alone — and at what multiplicity? §2 shows the flow is
-   ~79 % of a training step at the batch sizes in use, so a flow-side speedup
-   does move the total. The open part is quantitative, not conceptual.
+   rate, or the flow alone — and at what multiplicity? §2 shows the flow is the
+   larger share of a step, so a flow-side speedup does move the total. The open
+   part is quantitative, not conceptual.
 2. Which repository hosts MANGO code, and the licence/attribution arrangement
    with the upstream `conditional-nf-integration` author.
 3. The exact 32-core CPU reference configuration for the throughput gate — what

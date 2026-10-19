@@ -1,0 +1,2 @@
+benchmark,edges,ess,integral_estimate,log_integral_estimate,true_integral,absolute_integral_error,relative_integral_error,std_logw,graph
+madgraph_gg_ttbar_2,1,0.8086083565424314,2.630503319811354e-08,-17.453505539718684,,,,0.4882480743813851,"{0: [], 1: [0]}"

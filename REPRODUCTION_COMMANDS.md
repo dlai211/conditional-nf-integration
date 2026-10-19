@@ -621,11 +621,20 @@ only difference is `--device`:
 the GPU validation is still bit-identical to `results_public/` at all five
 energies, so the device does not affect the build-level check.
 
-### 9.2 Why — **corrected**
+### 9.2 Why — **corrected twice**
 
-An earlier revision of this section blamed the matrix element. A direct profile
-shows that is only true at large batch sizes. Measured with
-`scripts/profile_flow_vs_matrix_element.py` on the trained `gg_ttbar` model:
+Two earlier revisions of this section were wrong. The first blamed the matrix
+element. The second correctly identified the flow but used the wrong batch size:
+**`--batch-size` is the marginal-fit batch, not the KL batch.** The KL batch is
+`--is-points × 256`:
+
+| profile | is-points | **KL batch** |
+|---|---:|---:|
+| smoke | 32 (capped) | **8 192** |
+| thorough | 128 | **32 768** |
+
+Profiled with `scripts/profile_flow_vs_matrix_element.py` on the trained
+`gg_ttbar` model:
 
 | points | flow on CPU | flow on GPU | GPU speedup | matrix element | ME share (GPU) |
 |---:|---:|---:|---:|---:|---:|
@@ -633,14 +642,19 @@ shows that is only true at large batch sizes. Measured with
 | 30 000 | 735 ms | 520 ms | 1.41× | 321 ms | 38 % |
 | 100 000 | 2 555 ms | **532 ms** | **4.80×** | 1 020 ms | 66 % |
 
-The pipeline trains at `TRAIN_BATCH_SIZE = 10 000` and validates at
-`--gpu-chunk` 10 000 — the first row. There the **flow is ~79 % of the step**,
-so it *is* the bottleneck, but the **GPU flow is slower than the CPU flow**:
-10 000 points is too little work to amortise kernel-launch overhead. That is the
-explanation for 303 s versus 304 s.
+Smoke's 8 192-point batch sits **below** the crossover, where the GPU flow is
+slower than the CPU flow — which is why the 303 s / 304 s comparison showed
+nothing. Thorough's 32 768 sits **above** it, where the GPU flow is ~1.4× faster.
 
-At 100 000 points the GPU flow is 4.8× faster than the CPU one and the matrix
-element becomes dominant.
+**End-to-end check at the thorough batch** (smoke with `--is-points 128`):
+
+| KL batch | CPU | GPU | speedup |
+|---:|---:|---:|---:|
+| 8 192 | 303 s | 304 s | 1.00× |
+| 32 768 | 388 s | 365 s | **1.06×** |
+
+The gain is real but small, because a smoke run spends most of its time outside
+the KL loop.
 
 **(b) The driver round-trips host↔device every chunk.** From
 `run_madgraph_process_conditional_copula.py`:
@@ -652,9 +666,9 @@ for start in range(0, len(unit_numpy), me_chunk):
 return torch.as_tensor(np.concatenate(pieces), device=unit.device, ...)  # host → GPU
 ```
 
-Real, but second-order — it is not what makes the GPU unhelpful.
+Real, but second-order.
 
-### 9.3 Consequence — the batch size is a lever that works today
+### 9.3 Consequence — the validation path has a free win
 
 Same model, same 500 000 evaluations, only `--gpu-chunk` changed 10 000 →
 100 000. No code change:
@@ -669,16 +683,16 @@ Same model, same 500 000 evaluations, only `--gpu-chunk` changed 10 000 →
 
 For the Alpaka port:
 
-1. **Raise the batch size first** — 1.65–2.2× for free, and it moves the GPU
-   into the regime where it wins.
-2. **Then attack the flow's per-call overhead.** The flow is ~79 % of a step and
-   overhead-bound, not arithmetic-bound. A straight port inherits the launch
-   cost; the case rests on fusing the per-dimension chain into one kernel.
+1. **Raise the batch size first** — 1.65–2.2× on validation for free, and it
+   moves the GPU into the regime where it wins.
+2. **Then attack the flow's per-call overhead.** The flow is the larger share of
+   a step and overhead-bound, not arithmetic-bound. A straight port inherits the
+   launch cost; the case rests on fusing the per-dimension chain into one kernel.
 3. **The matrix element becomes the bottleneck only after both** (66 % at 100k).
 
 **The CPU-side parallel win is also real but smaller than it looks:** a
 16-thread pool gives 6× on the matrix element (§4.4 measured 103 000 → 614 000
-evals/s), but that element is ~21 % of a step at 10k points, so 6× there is
+evals/s), but at smoke's batch that element is ~21 % of a step, so 6× there is
 worth ~1.2× overall.
 
 ### 9.4 Thorough runs — results

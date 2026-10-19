@@ -155,14 +155,29 @@ Flow (sample + log q + backward) vs matrix element, same points:
 | 30 000 | 735 ms | 520 ms | 1.41× | 38 % |
 | 100 000 | 2 555 ms | **532 ms** | **4.80×** | 66 % |
 
-The pipeline trains at **10 000** points per step. There the flow is ~79 % of
-the step, and the GPU is **slower than the CPU** — too little work to amortise
-kernel launches.
+The pipeline's KL batch is `--is-points × 256` — **8 192 for smoke, 32 768 for
+thorough**. Smoke sits below the crossover, where the GPU is slower; thorough
+sits above it, where it wins ~1.4× on the KL stage.
+
+The flag that *looks* like the training batch (`--batch-size`) never reaches the
+KL stage — it sets the marginal-fit batch. That cost us one invalid experiment.
+
+**End-to-end, at the two KL batches** (smoke profile, CPU vs GPU):
+
+| KL batch | CPU | GPU | speedup |
+|---:|---:|---:|---:|
+| 8 192 (smoke default) | 303 s | 304 s | 1.00× |
+| 32 768 (thorough value) | 388 s | 365 s | **1.06×** |
+
+Real, but far below the 1.4× the profile gives the KL stage — a smoke run spends
+most of its time outside the KL loop.
 
 <!-- notes:
-This is the central technical result. It is not that the flow is cheap; it is
-that the GPU is starved. At 10k points the flow is the bottleneck and the GPU
-cannot help. At 100k the GPU wins 4.8x and the matrix element takes over.
+This is the second correction in this deck, and it is worth being explicit
+about. We first blamed the matrix element. Then we identified the flow but
+sized the experiment with the wrong flag. The correct knob is --is-points.
+Also note the honest scope: "the GPU buys nothing" describes smoke, not
+thorough training. We have not run a thorough CPU-vs-GPU comparison.
 -->
 
 ---
@@ -211,8 +226,8 @@ the reference is faster than 614k evals/s.
 
 # What this means for Alpaka
 
-**The flow is worth accelerating — ~79 % of a training step — but it is
-overhead-bound, not arithmetic-bound.**
+**The flow is worth accelerating — the larger share of a step at both profiles'
+batch sizes — but it is overhead-bound, not arithmetic-bound.**
 
 A straight port would inherit the same per-launch cost in C++.
 

@@ -319,16 +319,27 @@ GPU held-out NF results:
 | 1500 | 6.861171 ± 0.0026 | 0.933 | +0.31 |
 | 1950 | 4.7780877 ± 0.0014 | 0.960 | +1.50 |
 
-### 6.2 Why the GPU buys nothing here — **corrected**
+### 6.2 Where the time goes — **corrected twice**
 
-An earlier revision of this section said the matrix element was the ceiling and
-the flow was too cheap to matter. **That was wrong.** A direct profile shows the
-flow is the larger share at the batch sizes the pipeline uses; what is true is
-that the GPU *flow* is not faster than the CPU flow at those batch sizes.
+Two earlier revisions of this section were wrong, and both are recorded here
+because the second error was subtler than the first.
 
-Measured with `scripts/profile_flow_vs_matrix_element.py` on the trained
-`gg_ttbar` model (flow sampling + log q + backward against the matrix element on
-the same points):
+1. **First revision:** "the matrix element is the ceiling, the flow is too cheap
+   to matter." Wrong — the flow is the larger share.
+2. **Second revision:** "the flow is ~79 % of a step at the pipeline's training
+   batch of 10 000." Also wrong — **10 000 is the marginal-fit batch, not the KL
+   batch.** The flag that looks like the training batch (`--batch-size`) never
+   reaches the KL stage.
+
+The KL batch is `--is-points × ADAPTIVE_CONDITIONS_PER_STEP (256)`:
+
+| profile | is-points | **KL batch** |
+|---|---:|---:|
+| smoke | 32 (capped) | **8 192** |
+| thorough | 128 | **32 768** |
+
+Profiled flow cost (sample + log q + backward) against the matrix element on the
+same points, with `scripts/profile_flow_vs_matrix_element.py`:
 
 | points | flow on CPU | flow on GPU | GPU speedup | matrix element | ME share (GPU) |
 |---:|---:|---:|---:|---:|---:|
@@ -336,19 +347,33 @@ the same points):
 | 30 000 | 735 ms | 520 ms | 1.41× | 321 ms | 38 % |
 | 100 000 | 2 555 ms | **532 ms** | **4.80×** | 1 020 ms | 66 % |
 
-The pipeline trains at `TRAIN_BATCH_SIZE = 10 000` and validates with
-`--gpu-chunk` 10 000 — the first row. There:
+So the two profiles sit on opposite sides of the crossover:
 
-* the **flow is ~79 % of the step**, so it is the bottleneck;
-* the **GPU flow is slower than the CPU flow** (434 vs 295 ms), because 10 000
-  points is too little work to amortise kernel-launch overhead. The GPU spends
-  its time launching, not computing.
+* **smoke** runs at KL batch 8 192 — below it. The GPU flow is *slower* than the
+  CPU flow there because the batch is too small to amortise kernel launches.
+  That is why the original 303 s / 304 s comparison showed nothing: it was a
+  smoke run.
+* **thorough** runs at KL batch 32 768 — above it. The GPU flow is ~1.4× faster
+  and the matrix element is ~38 % of the step.
 
-That is the whole explanation for 303 s versus 304 s. It was never that the flow
-was cheap.
+**"The GPU buys nothing" is therefore a statement about the smoke profile, not
+about thorough training.** The original note generalised it incorrectly.
 
-At 100 000 points the same GPU flow is 4.8× faster than the CPU one, and the
-matrix element becomes the dominant cost.
+### 6.3 End-to-end check at the thorough batch
+
+Smoke with `--is-points 128`, giving KL batch 32 768 — the value thorough uses —
+CPU versus GPU, sequential:
+
+| KL batch | CPU | GPU | speedup | final ESS |
+|---:|---:|---:|---:|---:|
+| 8 192 (smoke default) | 303 s | 304 s | 1.00× | 0.8054 / 0.8074 |
+| 32 768 (thorough value) | **388 s** | **365 s** | **1.06×** | 0.8086 / 0.8099 |
+
+The GPU does start to help once the batch is large enough, but **1.06× is far
+below the 1.4× the profiler attributes to the KL stage alone** — because a smoke
+run spends most of its wall clock outside the KL loop. A definitive end-to-end
+number needs a thorough CPU run (about 5 h), which has not been done; on the
+evidence above, expect something between 1.06× and 1.4×.
 
 **(b) The driver still round-trips host↔device every chunk.** From
 `run_madgraph_process_conditional_copula.py`:
@@ -360,10 +385,9 @@ for start in range(0, len(unit_numpy), me_chunk):
 return torch.as_tensor(np.concatenate(pieces), device=unit.device, ...)  # host → GPU
 ```
 
-This is a real cost but a second-order one: it is not what makes the GPU
-unhelpful.
+This is a real cost but a second-order one.
 
-### 6.3 Consequence — the batch size is a lever that works today
+### 6.4 The validation path has a free win
 
 Same model, same 500 000 evaluations, only `--gpu-chunk` changed 10 000 →
 100 000. No code change:
@@ -378,18 +402,18 @@ Same model, same 500 000 evaluations, only `--gpu-chunk` changed 10 000 →
 
 For the Alpaka port:
 
-1. **Raise the batch size first** — 1.65–2.2× for free, and it puts the GPU in
-   the regime where it actually wins.
-2. **Then attack the flow's per-call overhead.** The flow is ~79 % of a step and
-   is overhead-bound, not arithmetic-bound. A straight Alpaka port would inherit
-   the launch cost; the case rests on fusing the per-dimension chain into one
-   kernel launch.
+1. **Raise the batch size first** — 1.65–2.2× on validation for free, and it puts
+   the GPU in the regime where it actually wins.
+2. **Then attack the flow's per-call overhead.** The flow is the larger share of
+   a step and is overhead-bound, not arithmetic-bound. A straight Alpaka port
+   would inherit the launch cost; the case rests on fusing the per-dimension
+   chain into one kernel launch.
 3. **The matrix element becomes the bottleneck only after both** (66 % at 100k).
 
 The gate is still defined on total event-generation rate, so both components
 matter — but the ordering above is what the measurements support.
 
-### 6.4 Thorough on GPU
+### 6.5 Thorough on GPU
 
 All three processes at `--speed-profile thorough --device cuda`, run
 sequentially, writing to `results/<proc>_copula_thorough_gpu/` and

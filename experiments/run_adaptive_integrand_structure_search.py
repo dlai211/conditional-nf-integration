@@ -5797,18 +5797,25 @@ def parse_args():
         type=int,
         default=None,
         help=(
-            "Points per training step. Defaults to 10 000, or 2 048 under "
-            "--speed-profile smoke. Passing it explicitly overrides the smoke "
-            "cap, which exists to keep the default smoke run short, not to "
-            "forbid measuring a larger batch."
+            "Points per step for the marginal-fit stages (and the chi2/masked "
+            "steps). NOTE: this does NOT set the KL batch -- that is "
+            "--is-points x ADAPTIVE_CONDITIONS_PER_STEP (256). Defaults to "
+            "10 000, or 2 048 under --speed-profile smoke. Passing it "
+            "explicitly overrides the smoke cap."
         ),
     )
 
     parser.add_argument(
         "--is-points",
         type=int,
-        default=
-            IS_POINTS_PER_CONDITION,
+        default=None,
+        help=(
+            "Points per condition in each importance-sampling draw, and "
+            "therefore half of the KL batch: the KL batch is "
+            "--is-points x ADAPTIVE_CONDITIONS_PER_STEP (256). Defaults to "
+            f"{IS_POINTS_PER_CONDITION}, or 32 under --speed-profile smoke. "
+            "Passing it explicitly overrides the smoke cap."
+        ),
     )
 
     parser.add_argument(
@@ -6125,7 +6132,10 @@ def main():
     if args.speed_profile == "smoke":
         # Exercise every major code path quickly. These settings are deliberately
         # unsuitable for accuracy claims or comparisons.
-        args.is_points = min(args.is_points, 32)
+        # An explicit --is-points or --batch-size survives the smoke cap; only
+        # the defaults are capped. See their help text.
+        if args.is_points is None:
+            args.is_points = 32
         args.max_rounds = min(args.max_rounds, 1)
         args.evidence_conditions = min(args.evidence_conditions, 256)
         args.evidence_resamples = min(args.evidence_resamples, 2)
@@ -6144,6 +6154,9 @@ def main():
 
     if args.batch_size is None:
         args.batch_size = TRAIN_BATCH_SIZE
+
+    if args.is_points is None:
+        args.is_points = IS_POINTS_PER_CONDITION
 
     TRAIN_BATCH_SIZE = (
         args.batch_size
@@ -6241,6 +6254,11 @@ def main():
     print(
         f"speed profile           = "
         f"{args.speed_profile}"
+    )
+
+    print(
+        f"training batch size     = "
+        f"{TRAIN_BATCH_SIZE}"
     )
 
     print(
