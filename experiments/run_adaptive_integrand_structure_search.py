@@ -5795,8 +5795,13 @@ def parse_args():
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=
-            TRAIN_BATCH_SIZE,
+        default=None,
+        help=(
+            "Points per training step. Defaults to 10 000, or 2 048 under "
+            "--speed-profile smoke. Passing it explicitly overrides the smoke "
+            "cap, which exists to keep the default smoke run short, not to "
+            "forbid measuring a larger batch."
+        ),
     )
 
     parser.add_argument(
@@ -6126,13 +6131,19 @@ def main():
         args.evidence_resamples = min(args.evidence_resamples, 2)
         args.masked_steps = min(args.masked_steps, 50)
         args.refine_steps = min(args.refine_steps, 25)
-        args.batch_size = min(args.batch_size, 2048)
+        # An explicit --batch-size survives the smoke cap; only the default is
+        # capped. See the --batch-size help text.
+        if args.batch_size is None:
+            args.batch_size = 2048
         args.mcmc_iter = min(args.mcmc_iter, 100)
         args.mcmc_burn = min(args.mcmc_burn, 20)
         args.mcmc_thin = min(args.mcmc_thin, 2)
 
     global TRAIN_BATCH_SIZE, DIM, target_log_integrand
     global COMPILE_TRAINING_KERNELS
+
+    if args.batch_size is None:
+        args.batch_size = TRAIN_BATCH_SIZE
 
     TRAIN_BATCH_SIZE = (
         args.batch_size
