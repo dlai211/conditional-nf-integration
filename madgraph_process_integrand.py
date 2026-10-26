@@ -170,20 +170,22 @@ class TwoBodyPhaseSpace:
 
 
 class ThreeBodyPhaseSpace:
-    """Map five unit coordinates to a massive three-body final state."""
+    """Map five unit coordinates to a massive or cut-regulated three-body final state."""
 
     dimension = 5
 
-    def __init__(self, mass1: float, mass2: float, mass3: float):
+    def __init__(self, mass1: float, mass2: float, mass3: float, m23_min: float = 0.0):
         self.masses = np.asarray((mass1, mass2, mass3), dtype=np.float64)
-        self.minimum_energy = float(np.sum(self.masses))
+        self.m23_min = max(float(mass2 + mass3), float(m23_min))
+        self.minimum_energy = float(mass1 + self.m23_min)
 
     @classmethod
-    def from_param_card(cls, param_card: Path, final_pdgs: list[int]):
+    def from_param_card(cls, param_card: Path, final_pdgs: list[int], cuts: dict[str, Any] | None = None):
         if len(final_pdgs) != 3:
             raise ValueError("three_body phase space requires exactly three final PDG ids")
         masses, _ = read_slha_masses_widths(param_card)
-        return cls(*(masses.get(abs(pdg), 0.0) for pdg in final_pdgs))
+        m23_min = float((cuts or {}).get("m_jj_min", 0.0))
+        return cls(*(masses.get(abs(pdg), 0.0) for pdg in final_pdgs), m23_min=m23_min)
 
     def map(self, unit: np.ndarray, sqrt_s: np.ndarray):
         unit = np.asarray(unit, dtype=np.float64)
@@ -196,7 +198,7 @@ class ThreeBodyPhaseSpace:
             raise ValueError(f"sqrt(s_hat) must exceed {self.minimum_energy:g} GeV")
 
         m1, m2, m3 = self.masses
-        q23_low = np.full(len(unit), (m2 + m3) ** 2)
+        q23_low = np.full(len(unit), self.m23_min ** 2)
         q23_high = (sqrt_s - m1) ** 2
         q23_range = q23_high - q23_low
         q23_sq = q23_low + q23_range * unit[:, 0]
@@ -312,6 +314,7 @@ class ConfiguredMadGraphIntegrand:
             standalone = Path(root) / standalone
         self.matrix_element = MadGraphMatrixElement(standalone, alpha_s=alpha_s)
         phase = spec["phase_space"]
+        self.cuts = phase.get("cuts", {})
         phase_spaces = {
             "two_body": TwoBodyPhaseSpace,
             "three_body": ThreeBodyPhaseSpace,
@@ -321,9 +324,14 @@ class ConfiguredMadGraphIntegrand:
             phase_space_class = phase_spaces[phase["type"]]
         except KeyError as error:
             raise ValueError(f"Unsupported phase-space type: {phase['type']!r}") from error
-        self.phase_space = phase_space_class.from_param_card(
-            self.matrix_element.param_card, phase["final_pdgs"]
-        )
+        if phase["type"] == "three_body":
+            self.phase_space = phase_space_class.from_param_card(
+                self.matrix_element.param_card, phase["final_pdgs"], cuts=self.cuts
+            )
+        else:
+            self.phase_space = phase_space_class.from_param_card(
+                self.matrix_element.param_card, phase["final_pdgs"]
+            )
         configured_dimension = phase.get("dimension")
         if configured_dimension is not None and int(configured_dimension) != self.phase_space.dimension:
             raise ValueError(
@@ -332,19 +340,55 @@ class ConfiguredMadGraphIntegrand:
             )
         self.dimension = self.phase_space.dimension
 
+    def _passes_cuts(self, final: np.ndarray) -> np.ndarray:
+        if not self.cuts:
+            return np.ones(len(final), dtype=bool)
+        mask = np.ones(len(final), dtype=bool)
+        jet_idx = self.cuts.get("jet_indices", [1, 2])
+        pt_min = float(self.cuts.get("pt_j_min", 0.0))
+        eta_max = float(self.cuts.get("eta_j_max", np.inf))
+        dr_min = float(self.cuts.get("dr_jj_min", 0.0))
+
+        etas, phis = [], []
+        for idx in jet_idx:
+            p = final[:, idx, :]  # (E, px, py, pz)
+            pt = np.hypot(p[:, 1], p[:, 2])
+            p_mag = np.sqrt(pt * pt + p[:, 3] * p[:, 3])
+            eta = 0.5 * np.log(
+                np.maximum(p_mag + p[:, 3], 1e-30)
+                / np.maximum(p_mag - p[:, 3], 1e-30)
+            )
+            phi = np.arctan2(p[:, 2], p[:, 1])
+            mask &= (pt >= pt_min) & (np.abs(eta) <= eta_max)
+            etas.append(eta)
+            phis.append(phi)
+
+        if len(jet_idx) >= 2 and dr_min > 0.0:
+            deta = etas[0] - etas[1]
+            dphi = (phis[0] - phis[1] + np.pi) % (2.0 * np.pi) - np.pi
+            dr = np.hypot(deta, dphi)
+            mask &= (dr >= dr_min)
+        return mask
+
     def log_integrand(self, unit: np.ndarray, sqrt_s: np.ndarray) -> np.ndarray:
         final, jacobian = self.phase_space.map(unit, sqrt_s)
         sqrt_s = np.asarray(sqrt_s, dtype=np.float64).reshape(-1)
+        cut_mask = self._passes_cuts(final)
+
         initial = np.zeros((len(unit), 2, 4), dtype=np.float64)
         initial[:, 0, 0] = initial[:, 1, 0] = sqrt_s / 2.0
         initial[:, 0, 3] = sqrt_s / 2.0
         initial[:, 1, 3] = -sqrt_s / 2.0
         momenta = np.concatenate((initial, final), axis=1)
-        values = self.matrix_element(momenta)
+
+        values = np.zeros(len(unit), dtype=np.float64)
+        if np.any(cut_mask):
+            values[cut_mask] = self.matrix_element(momenta[cut_mask])
+
         result = (
             np.log(np.maximum(values, 1e-300))
             + np.log(np.maximum(jacobian, 1e-300))
             - np.log(2.0 * sqrt_s * sqrt_s)
         )
-        result[(values <= 0) | (jacobian <= 0) | ~np.isfinite(result)] = -np.inf
+        result[(~cut_mask) | (values <= 0) | (jacobian <= 0) | ~np.isfinite(result)] = -np.inf
         return result

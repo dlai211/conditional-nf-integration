@@ -1,3 +1,7 @@
+> **Current work (2026-10-26):** see [`HANDOFF.md`](HANDOFF.md) — the balanced
+> `gg_zjj` training run is still active and the 200k uniform comparison is
+> pending. Read that file before starting or restarting any `gg_zjj` job.
+
 # Execution Policy
 
 The rules below are **scoped by machine**. Read the section for the machine you

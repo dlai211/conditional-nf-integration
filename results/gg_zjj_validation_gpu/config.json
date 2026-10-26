@@ -1,0 +1,23 @@
+{
+  "config": "C:\\Users\\laiji\\test\\conditional-nf-integration\\configs\\processes\\gg_zjj.json",
+  "checkpoint": "C:\\Users\\laiji\\test\\conditional-nf-integration\\results\\gg_zjj_copula_gpu\\madgraph_gg_zjj_5_final_model.pt",
+  "energies": null,
+  "sobol_power": 18,
+  "sobol_replicates": 8,
+  "nf_evals": 100000,
+  "gpu_chunk": 10000,
+  "uniform_fraction": 0.1,
+  "alpha_s": 0.118,
+  "seed": 20260920,
+  "device": "cuda",
+  "no_sobol": true,
+  "output": "C:\\Users\\laiji\\test\\conditional-nf-integration\\results\\gg_zjj_validation_gpu",
+  "resolved_energies": [
+    250.0,
+    400.0,
+    650.0,
+    1000.0,
+    1500.0,
+    1950.0
+  ]
+}

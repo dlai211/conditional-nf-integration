@@ -1,0 +1,25 @@
+{
+  "name": "gg_zjj",
+  "description": "Gluon-fusion Z + 2 jets (g g > z u u~) with LHC jet cuts and PDF-motivated sqrt(s_hat)",
+  "model": "sm",
+  "process": "g g > z u u~ @1",
+  "standalone": "generated/gg_zjj_standalone",
+  "phase_space": {
+    "type": "three_body",
+    "dimension": 5,
+    "final_pdgs": [23, 2, -2],
+    "cuts": {
+      "jet_indices": [1, 2],
+      "pt_j_min": 20.0,
+      "eta_j_max": 2.5,
+      "dr_jj_min": 0.4,
+      "m_jj_min": 20.0
+    }
+  },
+  "condition": {
+    "name": "sqrt_s_hat_gev",
+    "minimum": 200.0,
+    "maximum": 2000.0,
+    "held_out": [250.0, 400.0, 650.0, 1000.0, 1500.0, 1950.0]
+  }
+}

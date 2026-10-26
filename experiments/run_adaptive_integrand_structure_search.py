@@ -252,6 +252,12 @@ BRIDGE_COPULA_LR = 3e-4
 PROPOSAL_UNIFORM_FRACTION = 0.10
 PROPOSAL_MIN_UNIFORM_FRACTION = 0.02
 
+# Bisection steps in the spline inverse. The final Newton correction is
+# separate, so 8-12 steps already agree with the 40-step reference to ~1e-5
+# in the log-Jacobian in float32, while costing 2-3x less per dimension.
+# Evaluation keeps the 40-step default; this knob is for training.
+TRAINING_INVERSE_ITERATIONS = 40
+
 # Once an NF exists, the proposal should be much better.
 NF_ADAPTIVE_POINTS = 128
 
@@ -1012,6 +1018,11 @@ def make_real_model(
         )
     )
 
+    for marginal in model.marginals:
+        marginal.inverse_iterations = TRAINING_INVERSE_ITERATIONS
+    for conditional in model.copula.conditionals.values():
+        conditional.inverse_iterations = TRAINING_INVERSE_ITERATIONS
+
     return model
 
 
@@ -1116,8 +1127,8 @@ def sample_from_proposal(
     """Draw from and evaluate a defensive uniform/model mixture."""
 
     if proposal_model is None:
-        x = torch.rand(n, DIM, device=device)
-        return x, torch.zeros(n, device=device)
+        x = torch.rand(n, DIM, device=device, dtype=cond.dtype)
+        return x, torch.zeros(n, device=device, dtype=cond.dtype)
 
     if not 0.0 < uniform_fraction < 1.0:
         raise ValueError("uniform_fraction must lie strictly between 0 and 1")
@@ -1126,7 +1137,10 @@ def sample_from_proposal(
     x = sample_from_model(proposal_model, n, cond)
     if use_uniform.any():
         x[use_uniform] = torch.rand(
-            int(use_uniform.sum().item()), DIM, device=device
+            int(use_uniform.sum().item()),
+            DIM,
+            device=device,
+            dtype=x.dtype,
         )
 
     log_q = proposal_model.log_prob(x, cond).reshape(-1)
@@ -2967,11 +2981,16 @@ def evaluate_ess(
             ),
 
         "std_logw":
+            # Cut-rejected points carry log f = -inf and therefore log w = -inf.
+            # They contribute zero weight, but a plain .std() over them returns
+            # NaN; report the dispersion of the finite weights instead.
             float(
-                logw
+                logw[torch.isfinite(logw)]
                 .std()
                 .item()
-            ),
+            )
+            if bool(torch.isfinite(logw).any())
+            else float("nan"),
 
         "uniform_fraction": float(uniform_fraction),
     }
@@ -4481,6 +4500,8 @@ def train_initial_marginals(
             device
         )
     )
+    for marginal in bank.marginals:
+        marginal.inverse_iterations = TRAINING_INVERSE_ITERATIONS
 
     proposal = None
     stage_results = []
@@ -4489,10 +4510,23 @@ def train_initial_marginals(
     stage = 0
 
     while current_beta < 1.0 - 1e-12:
-        if args.speed_profile in ("smoke", "thorough"):
-            if args.speed_profile == "smoke":
-                schedule = (0.02, 0.08, 0.25, 0.55, 1.00)
-                schedule_label = "short smoke-test schedule"
+        if args.temperatures is not None or args.speed_profile in ("smoke", "thorough"):
+            if args.temperatures is not None:
+                schedule = tuple(args.temperatures)
+                schedule_label = "CLI temperature override"
+            elif args.speed_profile == "smoke":
+                # The coarse five-point schedule is fine in 2-D/5-D/8-D but
+                # collapses the weighted cache in 32-D: at beta=0.08 the
+                # target's log-density spread is already ~O(10) per point, so
+                # the effective sample size falls to ~3 and the marginal fit
+                # early-stops on a degenerate cache. Use the same fine grid
+                # the thorough profile uses for high dimensions.
+                if DIM >= 32:
+                    schedule = HIGH_DIM_MARGINAL_TEMPERATURES
+                    schedule_label = "high-dimensional smoke schedule"
+                else:
+                    schedule = (0.02, 0.08, 0.25, 0.55, 1.00)
+                    schedule_label = "short smoke-test schedule"
             else:
                 schedule = (
                     HIGH_DIM_MARGINAL_TEMPERATURES
@@ -5762,6 +5796,30 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--inverse-iterations",
+        type=int,
+        default=40,
+        help=(
+            "Bisection steps in the spline inverse during training. The final "
+            "Newton correction is unchanged; 8-12 steps agree with the "
+            "40-step reference to ~1e-5 in the log-Jacobian in float32 and "
+            "cost 2-3x less per dimension. Evaluation keeps 40."
+        ),
+    )
+
+    parser.add_argument(
+        "--temperatures",
+        type=float,
+        nargs="+",
+        default=None,
+        help=(
+            "Override the fixed annealing schedule (for example "
+            "--temperatures 0.01 0.025 0.05 0.1 0.25 0.5 1.0). Must be "
+            "strictly increasing in (0, 1] and end at 1.0."
+        ),
+    )
+
+    parser.add_argument(
         "--compile-kernels",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -6128,6 +6186,21 @@ def configure_speed_profile(profile):
 def main():
     args = parse_args()
     configure_speed_profile(args.speed_profile)
+
+    global TRAINING_INVERSE_ITERATIONS
+    TRAINING_INVERSE_ITERATIONS = max(1, int(args.inverse_iterations))
+
+    if args.temperatures is not None:
+        temperatures = [float(value) for value in args.temperatures]
+        if (
+            any(not (0.0 < value <= 1.0) for value in temperatures)
+            or abs(temperatures[-1] - 1.0) > 1e-9
+            or any(right <= left for left, right in zip(temperatures, temperatures[1:]))
+        ):
+            raise SystemExit(
+                "--temperatures must be strictly increasing in (0, 1] "
+                "and end at 1.0"
+            )
 
     if args.speed_profile == "smoke":
         # Exercise every major code path quickly. These settings are deliberately

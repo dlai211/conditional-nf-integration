@@ -664,6 +664,7 @@ class MarginalCopulaFlow(nn.Module):
             n,
             self.dim,
             device=device,
+            dtype=cond.dtype,
         )
 
         u = torch.zeros_like(v)

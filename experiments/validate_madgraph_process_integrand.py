@@ -46,10 +46,17 @@ def main() -> None:
     for name, value in checks.items():
         print(f"{name:25s} = {value:.12g}")
     print(f"finite log-integrand frac = {finite.mean():.12g}")
+    print(f"cut-rejected fraction     = {1.0 - finite.mean():.12g}")
     print(f"positive integrand frac   = {np.mean(finite):.12g}")
     print(f"throughput points/s       = {args.points / max(elapsed, 1e-12):.3f}")
-    if checks["finite_fraction"] != 1.0 or not finite.all():
-        raise SystemExit("Validation failed: non-finite phase space or integrand")
+    if checks["finite_fraction"] != 1.0:
+        raise SystemExit("Validation failed: non-finite phase-space momenta")
+    if checks["minimum_jacobian"] <= 0.0:
+        raise SystemExit("Validation failed: non-positive phase-space Jacobian")
+    if finite.mean() <= 0.0:
+        raise SystemExit(
+            "Validation failed: no phase-space points pass the configured cuts"
+        )
 
 
 if __name__ == "__main__":

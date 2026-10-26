@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conditional NF Visual Debugger</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-copy">
+      <p class="eyebrow">MadGraph · conditional normalizing flow</p>
+      <h1>Conditional NF Visual Debugger</h1>
+      <p class="lede">
+        Follow one base sample through the marginal splines and the autoregressive
+        copula into phase space, then inspect the importance weights that turn the
+        proposal into an integral estimate.
+      </p>
+    </div>
+    <div class="header-meta" aria-label="Run metadata">
+      <span class="chip">gg → t t̄</span>
+      <span class="chip">2-D proposal</span>
+      <span class="chip chip-device" id="device-chip">CUDA model · CPU matrix element</span>
+    </div>
+  </header>
+
+  <section class="controls" aria-label="Global controls">
+    <div class="control control-energy">
+      <div class="control-head">
+        <label for="energy">Collision energy √ŝ</label>
+        <output id="energy-value" for="energy">1000 GeV</output>
+      </div>
+      <input type="range" id="energy" min="400" max="2000" step="50" value="1000">
+      <div class="ticks" aria-hidden="true">
+        <span>400</span><span>650</span><span>1000</span><span>1500</span><span>1950</span><span>2000</span>
+      </div>
+      <p class="hint" id="energy-hint">Computed condition: 1000 GeV</p>
+    </div>
+
+    <div class="control control-beta">
+      <div class="control-head">
+        <label for="beta">Annealing stage β</label>
+        <output id="beta-value" for="beta">1.00</output>
+      </div>
+      <input type="range" id="beta" min="0" max="4" step="1" value="4">
+      <div class="ticks" aria-hidden="true">
+        <span>0.00</span><span>0.08</span><span>0.25</span><span>0.55</span><span>1.00</span>
+      </div>
+    </div>
+
+    <div class="control control-step">
+      <span class="control-label" id="step-label">Transformation step</span>
+      <div class="segmented" id="step-buttons" role="group" aria-labelledby="step-label">
+        <button type="button" data-step="1" aria-pressed="true">1 · base</button>
+        <button type="button" data-step="2" aria-pressed="false">2 · marginal</button>
+        <button type="button" data-step="3" aria-pressed="false">3 · copula</button>
+        <button type="button" data-step="4" aria-pressed="false">4 · kinematic</button>
+      </div>
+    </div>
+
+    <div class="control control-density">
+      <span class="control-label">Sample density</span>
+      <div class="radios" id="density-radios">
+        <label><input type="radio" name="density" value="500">500</label>
+        <label><input type="radio" name="density" value="2000" checked>2,000</label>
+        <label><input type="radio" name="density" value="5000">5,000</label>
+      </div>
+    </div>
+
+    <div class="control control-play">
+      <button type="button" id="play" class="play-button" aria-pressed="false">
+        <span class="play-icon" aria-hidden="true">▶</span><span id="play-label">Play</span>
+      </button>
+      <p class="hint">Steps 1→4, then β</p>
+    </div>
+  </section>
+
+  <main class="grid">
+    <!-- Panel 1 ------------------------------------------------------------>
+    <section class="panel" id="panel-arch" aria-labelledby="arch-title">
+      <header class="panel-head">
+        <div class="panel-title">
+          <span class="panel-number">01</span>
+          <h2 id="arch-title">Macro execution &amp; data flow</h2>
+        </div>
+        <span class="panel-tag">call hierarchy</span>
+      </header>
+
+      <div class="arch" id="arch-graph">
+        <button type="button" class="arch-node" data-node="driver">
+          <span class="node-index">1</span>
+          <span class="node-text">
+            <strong>Driver</strong>
+            <code>experiments/run_madgraph_process_conditional_copula.py</code>
+            <span class="node-fn">main()</span>
+          </span>
+          <span class="node-device device-cpu">CPU</span>
+        </button>
+        <div class="arch-arrow" aria-hidden="true">↓</div>
+
+        <button type="button" class="arch-node" data-node="engine">
+          <span class="node-index">2</span>
+          <span class="node-text">
+            <strong>Search engine</strong>
+            <code>run_adaptive_integrand_structure_search.py</code>
+            <span class="node-fn">sample_from_proposal() · evaluate_ess()</span>
+          </span>
+          <span class="node-device device-cuda">CUDA</span>
+        </button>
+        <div class="arch-arrow" aria-hidden="true">↓</div>
+
+        <button type="button" class="arch-node" data-node="marginals">
+          <span class="node-index">3</span>
+          <span class="node-text">
+            <strong>Marginals + copula</strong>
+            <code>nf/conditional_cubic_1d.py</code>
+            <span class="node-fn">ConditionalCubicFlow1D.forward() · inverse()</span>
+          </span>
+          <span class="node-device device-cuda">CUDA</span>
+        </button>
+
+        <div class="memory-boundary" id="memory-boundary">
+          <div class="memory-copy">
+            <span class="memory-title">Memory boundary</span>
+            <code>unit.detach().cpu().numpy()</code>
+          </div>
+          <span class="memory-note">GPU VRAM → CPU RAM · per matrix-element chunk</span>
+        </div>
+
+        <button type="button" class="arch-node" data-node="phasespace">
+          <span class="node-index">4</span>
+          <span class="node-text">
+            <strong>Phase-space mapping</strong>
+            <code>madgraph_process_integrand.py</code>
+            <span class="node-fn">ConfiguredMadGraphIntegrand.log_integrand()</span>
+          </span>
+          <span class="node-device device-cpu">CPU</span>
+        </button>
+        <div class="arch-arrow" aria-hidden="true">↓</div>
+
+        <button type="button" class="arch-node" data-node="fortran">
+          <span class="node-index">5</span>
+          <span class="node-text">
+            <strong>Fortran subprocess</strong>
+            <code>SubProcesses/P1_gg_ttx/matrix2py.pyd</code>
+            <span class="node-fn">py_m0_smatrix · single thread</span>
+          </span>
+          <span class="node-device device-cpu">CPU</span>
+        </button>
+      </div>
+
+      <div class="code-callout" id="arch-callout" aria-live="polite"></div>
+
+      <div class="math-block">
+        $$q_\theta(x \mid c) = \prod_{i=1}^{d} q_i(x_i \mid c)\; c_\theta(u_1,\dots,u_d \mid c)$$
+        $$f(x \mid c) = |\mathcal{M}(x \mid c)|^2\;\Phi(x)\;\mathcal{J}(x)\;\Theta_{\text{cuts}}(x)$$
+      </div>
+    </section>
+
+    <!-- Panel 2 ------------------------------------------------------------>
+    <section class="panel" id="panel-space" aria-labelledby="space-title">
+      <header class="panel-head">
+        <div class="panel-title">
+          <span class="panel-number">02</span>
+          <h2 id="space-title">Coordinate-space evolution</h2>
+        </div>
+        <span class="panel-tag" id="space-stage-label">step 1 · base space</span>
+      </header>
+
+      <div id="space-plot" class="plot plot-space" role="img"
+           aria-label="Scatter of samples in the selected coordinate space"></div>
+
+      <div class="stage-rail" id="stage-rail" aria-hidden="true">
+        <span data-stage="1">base</span>
+        <span data-stage="2">marginal</span>
+        <span data-stage="3">copula</span>
+        <span data-stage="4">kinematic</span>
+      </div>
+      <p class="edge-readout" id="edge-readout">—</p>
+
+      <div class="code-callout" id="space-callout" aria-live="polite"></div>
+
+      <div class="math-block">
+        $$u \sim U([0,1]^d)$$
+        $$q_i(x_i \mid c) = \left|\frac{\partial u_i}{\partial x_i}\right|
+          = \frac{1}{h_k}\left(d_0(1-t)^2 + 2st(1-t) + d_1 t^2\right)$$
+        <p class="math-note">\(h_k\) is the bin width, \(t\) the position inside
+          the bin, and \(s\) the secant slope.</p>
+      </div>
+    </section>
+
+    <!-- Panel 3 ------------------------------------------------------------>
+    <section class="panel" id="panel-anneal" aria-labelledby="anneal-title">
+      <header class="panel-head">
+        <div class="panel-title">
+          <span class="panel-number">03</span>
+          <h2 id="anneal-title">Annealing bridge &amp; target peaks</h2>
+        </div>
+        <span class="panel-tag" id="anneal-label">β = 1.00</span>
+      </header>
+
+      <div class="plot-split">
+        <div id="anneal-plot" class="plot plot-anneal" role="img"
+             aria-label="Density contour of the annealed proposal"></div>
+        <div id="anneal-projection" class="plot plot-projection" role="img"
+             aria-label="One-dimensional projection of the annealed density"></div>
+      </div>
+
+      <div class="code-callout" id="anneal-callout" aria-live="polite"></div>
+
+      <div class="math-block">
+        $$p_{\beta_t}(x \mid c) \propto q_{t-1}(x \mid c)^{1-\beta_t}\; f(x \mid c)^{\beta_t}$$
+        <p class="math-note">On the grid the previous proposal is uniform, so
+          \(p_\beta \propto f^\beta\); \(\beta=0\) is flat and \(\beta=1\) is the
+          matrix-element target.</p>
+      </div>
+    </section>
+
+    <!-- Panel 4 ------------------------------------------------------------>
+    <section class="panel" id="panel-weights" aria-labelledby="weights-title">
+      <header class="panel-head">
+        <div class="panel-title">
+          <span class="panel-number">04</span>
+          <h2 id="weights-title">Importance sampling diagnostics</h2>
+        </div>
+        <span class="panel-tag" id="weights-label">1000 GeV</span>
+      </header>
+
+      <div id="weights-plot" class="plot plot-weights" role="img"
+           aria-label="Histogram of log importance weights"></div>
+
+      <div class="gauges">
+        <div class="gauge">
+          <span class="gauge-label">ESS / N</span>
+          <span class="gauge-value" id="ess-value">—</span>
+          <div class="meter" role="meter" aria-label="Normalized effective sample size"
+               aria-valuemin="0" aria-valuemax="1" aria-valuenow="0" id="ess-meter">
+            <span id="ess-meter-fill"></span>
+          </div>
+          <span class="gauge-note" id="ess-note">—</span>
+        </div>
+        <div class="gauge">
+          <span class="gauge-label">Î<sub>NF</sub> vs Î<sub>Sobol</sub></span>
+          <span class="gauge-value gauge-small" id="integral-value">—</span>
+          <span class="gauge-note" id="integral-note">—</span>
+        </div>
+        <div class="gauge">
+          <span class="gauge-label">Pull</span>
+          <span class="gauge-value" id="pull-value">—</span>
+          <span class="gauge-note" id="pull-note">—</span>
+        </div>
+      </div>
+
+      <div class="code-callout" id="weights-callout" aria-live="polite"></div>
+
+      <div class="math-block">
+        $$W_n = \frac{f(X_n \mid c)}{r_\theta(X_n \mid c)},\qquad
+          r_\theta = (1-\epsilon)\,q_\theta + \epsilon\,U$$
+        $$\mathrm{Pull} = \frac{\hat{I}_{\mathrm{NF}} - \hat{I}_{\mathrm{Sobol}}}
+          {\sqrt{\sigma_{\mathrm{NF}}^2 + \sigma_{\mathrm{Sobol}}^2}}$$
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p>
+      Telemetry: <code>web_visualizer/telemetry_data.json</code> ·
+      checkpoint <code>results/gg_ttbar_copula_smoke_gpu/</code> ·
+      weights from 2,000 trace samples; gauges from the 500,000-sample validation run.
+    </p>
+    <p class="footer-hint">
+      Serve this directory rather than opening the file directly:
+      <code>cd web_visualizer &amp;&amp; python -m http.server 8000</code>.
+    </p>
+  </footer>
+
+  <div id="fatal" class="fatal" hidden></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

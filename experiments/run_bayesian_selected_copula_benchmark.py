@@ -478,6 +478,7 @@ class StructuredCopula(nn.Module):
         u[:, 0] = torch.rand(
             n,
             device=cond.device,
+            dtype=cond.dtype,
         )
 
         for j in range(
@@ -495,6 +496,7 @@ class StructuredCopula(nn.Module):
                 n,
                 1,
                 device=cond.device,
+                dtype=cond.dtype,
             )
 
             uj, _ = (
