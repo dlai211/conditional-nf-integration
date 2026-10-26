@@ -7,14 +7,15 @@ previous HEAD `938f31f`).
 
 ## TL;DR
 
-1. A **balanced** training run for the new 5-D `gg_zjj` process is **still
-   running**. Do not start a second one; it writes its checkpoint only at the
-   end.
-2. When it finishes, run the 200k `--no-sobol --compare-uniform` validation in
-   §3 (about 2–3 minutes). That is the only remaining step from the current
-   request.
-3. All code and documentation are committed. The live checkpoint and balanced
-   result tree are local-only (`*.pt` is gitignored).
+1. The **balanced** training run for the new 5-D `gg_zjj` process was
+   **stopped at the user's request on 2026-10-26 around 05:43** (last log step
+   3200; no checkpoint was written). A fresh session must **restart it from
+   scratch** — see §1.
+2. When the restarted run finishes, run the 200k
+   `--no-sobol --compare-uniform` validation in §3 (about 2–3 minutes). That is
+   the remaining task.
+3. All code and documentation are committed. The stopped run produced no
+   checkpoint; the smoke checkpoint is local-only (`*.pt` is gitignored).
 
 ## 0. Environment
 
@@ -34,7 +35,13 @@ Commands that load the MadGraph standalone must run **from
 `Cards/ident_card.dat` relative to the CWD. The training and validation
 commands below were run there.
 
-## 1. Live balanced training
+## 1. Balanced training (stopped — restart)
+
+> **Status:** stopped on 2026-10-26 around 05:43 at the user's request. The
+> last log line was KL round 0 step 3200 (`val NLL=-0.972532`, `lr=1.0e-3`).
+> No checkpoint or summary was written: the wrapper writes them only at the
+> end.
+> **Restart from scratch** with the command below.
 
 ```bash
 cd "$REPO/generated/gg_zjj_standalone"
@@ -46,22 +53,22 @@ PYTHONPATH="$REPO:$REPO/experiments" "$PY" -u \
   --output "$REPO/results/gg_zjj_copula_balanced_gpu"
 ```
 
-- Windows PID **35776** (Git Bash PID 633), started **03:33**.
 - Log: `/tmp/gg_zjj_balanced.log` =
-  `C:\Users\laiji\AppData\Local\Temp\gg_zjj_balanced.log`.
-- At **05:19** it was in KL round 0, **step 2400 / 12000**, `lr=3.0e-3`,
-  `val NLL=-0.953735`, source ESS `0.5895`.
-- Rough ETA: ~1 step/s; two adaptive KL rounds (cap 12,000 each), a χ² stage
-  (cap 3,600) and cache rebuilds. Expect roughly **3–6 more hours** from 05:19,
-  possibly up to ~8 h if both KL rounds hit their cap. Early convergence can
-  shorten it: it requires `lr <= 1e-4` and three checks with
-  `|relative improvement| < 1%`.
+  `C:\Users\laiji\AppData\Local\Temp\gg_zjj_balanced.log`. The old log is
+  stale; overwrite it when restarting.
+- Expected cost: the stopped run took ~2 h 10 min of wall time (03:33–05:43)
+  to reach KL step 3200, including setup. The last 800 steps took ~28 min
+  (~2 s/step) while the machine was also running checks. If that rate holds,
+  the 12,000-step cap is many hours per KL round; budget **6–16 h** for the
+  full two-round + χ² run, and measure the first 400 steps after restart to
+  extrapolate. Early convergence can shorten it: it requires `lr <= 1e-4` and
+  three checks with `|relative improvement| < 1%`.
 
 Check progress with:
 
 ```bash
 tail -20 /tmp/gg_zjj_balanced.log
-ps -W | grep python          # WINPID 35776
+ps -W | grep python
 ```
 
 Look for `CHI^2`, `FINAL RESULT`, or a final summary. **Do not assume the
@@ -71,7 +78,10 @@ checkpoint exists just because the log is active** — the wrapper writes
 log stops without `FINAL RESULT`, the run died and must be restarted from
 scratch (there is no intermediate checkpoint).
 
-### ESS progression observed so far
+### ESS progression observed before the stop
+
+These values are from the stopped run and serve as a sanity reference for the
+restart; they are not a saved checkpoint.
 
 | stage | mean conditional ESS | mean raw ESS |
 |---|---:|---:|
@@ -186,7 +196,8 @@ The 32-D `thorough` run is **not** complete; that remains the verification step.
 
 ## 3. Remaining task — 200k comparison
 
-Run this **only after** the final checkpoint and summary exist:
+First restart the training in §1. Run this **only after** the final checkpoint
+and summary exist:
 
 ```bash
 cd "$REPO/generated/gg_zjj_standalone"
@@ -227,10 +238,10 @@ and the weight diagnostics.
 - `*.pt` checkpoints are gitignored. The smoke checkpoint and the eventual
   balanced checkpoint are local-only; a fresh clone cannot rerun validation
   without retraining or copying them.
-- The balanced output directory does not exist until the run finishes; this is
-  expected.
-- The background task IDs from the previous Claude session are session-local.
-  Use the log, the Windows PID, and the filesystem instead.
+- The balanced output directory does not exist now; it appears only when the
+  restarted run finishes. This is expected.
+- The previous Claude session's task IDs and PIDs are dead. Use the log and
+  the filesystem, and start the restarted job from the new session.
 - `uniform_estimate` evaluates all 200k uniform points in one
   `log_integrand` call. The Fortran wrapper is a Python per-event loop, so that
   is CPU work (~7 s), not a GPU operation; memory is small.
@@ -244,7 +255,8 @@ and the weight diagnostics.
 
 ## 6. Commit contents
 
-This handoff is committed with:
+Committed on `main` (main work `48e18aa`; this handoff update is a follow-up
+commit):
 
 - modified: `madgraph_process_integrand.py`,
   `experiments/run_adaptive_integrand_structure_search.py`,
