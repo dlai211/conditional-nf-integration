@@ -788,18 +788,20 @@ python scripts/compare_validation.py \
 
 Six partonic Z + jets configurations were built and smoke-trained on the `odyssey` node (4x AMD Instinct MI300A, torch 2.5.1+rocm6.2, MadGraph 3.6.7). Training used `--speed-profile smoke --device cuda --me-workers 16`; each held-out validation used `--nf-evals 100000 --no-sobol --compare-uniform`, so the reference is an equal-budget uniform Monte Carlo, not randomized Sobol.
 
+The two 2-D configs were first run **without** jet cuts. They were then rerun with `pt_j > 20` and `abs(eta_j) < 2.5`; both sets of results are kept below, with the original rows labelled **no cuts** and the rerun rows labelled **pt/eta cuts**.
+
 ### 8.1 Processes
 
-| config | process | dim | final PDGs | jet cuts |
+| config | process | dim | final PDGs | jet cuts (current config) |
 |---|---|---:|---|---|
-| `gu_zu.json` | `g u > z u @1` | 2 | [23, 2] | none |
-| `qqbar_zg.json` | `u u~ > z g @1` | 2 | [23, 21] | none |
+| `gu_zu.json` | `g u > z u @1` | 2 | [23, 2] | pt 20, abs(eta) 2.5 (added after the uncut run) |
+| `qqbar_zg.json` | `u u~ > z g @1` | 2 | [23, 21] | pt 20, abs(eta) 2.5 (added after the uncut run) |
 | `gg_zuubar.json` | `g g > z u u~ @1` | 5 | [23, 2, -2] | pt 20, abs(eta) 2.5, dR 0.4, m_jj 20 |
 | `gu_zug.json` | `g u > z u g @1` | 5 | [23, 2, 21] | pt 20, abs(eta) 2.5, dR 0.4, m_jj 20 |
 | `qqbar_zgg.json` | `u u~ > z g g @1` | 5 | [23, 21, 21] | pt 20, abs(eta) 2.5, dR 0.4, m_jj 20 |
 | `uu_zuu.json` | `u u > z u u @1` | 5 | [23, 2, 2] | pt 20, abs(eta) 2.5, dR 0.4, m_jj 20 |
 
-The four 5-D processes use the standard jet cuts and condition `sqrt(s_hat) in [200, 2000] GeV`; the two 2-D processes use the same condition and no jet cuts (the two-body phase-space class does not apply them). Held-out energies are 250, 400, 650, 1000, 1500 and 1950 GeV.
+The four 5-D processes use the standard jet cuts and condition `sqrt(s_hat) in [200, 2000] GeV`; the two 2-D processes use the same condition. Held-out energies are 250, 400, 650, 1000, 1500 and 1950 GeV.
 
 ### 8.2 Standalone build and integrand validation
 
@@ -807,21 +809,25 @@ The four 5-D processes use the standard jet cuts and condition `sqrt(s_hat) in [
 
 | process | dim | max 4-momentum residual | max mass-shell residual | min Jacobian | finite fraction | cut-rejected fraction | points/s |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `gu_zu` | 2 | 2.274e-13 | 3.602e-10 | 0.0316673 | 1 | 0 | 77,457 |
-| `qqbar_zg` | 2 | 2.274e-13 | 3.602e-10 | 0.0316673 | 1 | 0 | 94,500 |
+| `gu_zu (no cuts)` | 2 | 2.274e-13 | 3.602e-10 | 0.0316673 | 1 | 0 | 77,457 |
+| `qqbar_zg (no cuts)` | 2 | 2.274e-13 | 3.602e-10 | 0.0316673 | 1 | 0 | 94,500 |
+| `gu_zu (pt/eta cuts)` | 2 | 2.274e-13 | 3.602e-10 | 0.0316673 | 1 | 0.026 | 111,759 |
+| `qqbar_zg (pt/eta cuts)` | 2 | 2.274e-13 | 3.602e-10 | 0.0316673 | 1 | 0.026 | 94,912 |
 | `gg_zuubar` | 5 | 6.821e-13 | 3.602e-10 | 0.187294 | 1 | 0.07 | 19,236 |
 | `gu_zug` | 5 | 6.821e-13 | 3.602e-10 | 0.187294 | 1 | 0.07 | 19,451 |
 | `qqbar_zgg` | 5 | 6.821e-13 | 3.602e-10 | 0.187294 | 1 | 0.07 | 19,497 |
 | `uu_zuu` | 5 | 6.821e-13 | 3.602e-10 | 0.187294 | 1 | 0.07 | 26,673 |
 
-All six have finite momenta, positive Jacobians and a fully finite integrand. The 5-D cut-rejected fraction is 7% at random points; the 2-D configs apply no cuts.
+All entries have finite momenta, positive Jacobians and a fully finite integrand. The 5-D configs reject 7% of random points; the cut 2-D configs reject 2.6%; the uncut 2-D configs reject none.
 
 ### 8.3 Smoke training
 
 | process | dim | edges | ESS | Ihat (GeV^-2) | log w std | wall |
 |---|---:|---:|---:|---:|---:|---:|
-| `gu_zu` | 2 | 1 | 0.009237 | 1.65304990e-08 | 1.241441 | 1m35.515s |
-| `qqbar_zg` | 2 | 1 | 0.014961 | 9.17253501e-08 | 1.374604 | 1m44.740s |
+| `gu_zu (no cuts)` | 2 | 1 | 0.009237 | 1.65304990e-08 | 1.241441 | 1m35.515s |
+| `qqbar_zg (no cuts)` | 2 | 1 | 0.014961 | 9.17253501e-08 | 1.374604 | 1m44.740s |
+| `gu_zu (pt/eta cuts)` | 2 | 1 | 0.282408 | 4.59761106e-09 | 1.121103 | 1m48.185s |
+| `qqbar_zg (pt/eta cuts)` | 2 | 1 | 0.196449 | 2.27723040e-08 | 1.229682 | 1m54.957s |
 | `gg_zuubar` | 5 | 10 | 0.465148 | 4.35782187e-10 | 0.814323 | 4m34.322s |
 | `gu_zug` | 5 | 10 | 0.443344 | 1.73955431e-08 | 0.750414 | 4m45.083s |
 | `qqbar_zgg` | 5 | 10 | 0.196134 | 1.67528378e-08 | 1.159202 | 4m57.086s |
@@ -835,18 +841,30 @@ NF and uniform Monte Carlo each use 100,000 evaluations per energy. `pull = (NF 
 
 | process | E (GeV) | NF (pb) | NF stderr | NF rel. | NF ESS | uniform (pb) | uniform stderr | uniform ESS | pull | ESS ratio | variance reduction |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `gu_zu` | 250 | 39.4995 | 7.85 | 19.878% | 0.000253 | 23.4245 | 1.75 | 0.00179 | +2.00 | 0.14x | 0.05x |
-| `gu_zu` | 400 | 14.4514 | 0.843 | 5.834% | 0.002929 | 25.4693 | 11.6 | 4.795e-05 | -0.94 | 61.09x | 190.30x |
-| `gu_zu` | 650 | 12.9994 | 5.29 | 40.709% | 6.034e-05 | 11.99 | 4.67 | 6.586e-05 | +0.14 | 0.92x | 0.78x |
-| `gu_zu` | 1000 | 2.40419 | 0.108 | 4.480% | 0.004958 | 1.8521 | 0.254 | 0.0005332 | +2.00 | 9.30x | 5.54x |
-| `gu_zu` | 1500 | 1.34645 | 0.159 | 11.792% | 0.0007186 | 1.82362 | 0.668 | 7.445e-05 | -0.69 | 9.65x | 17.72x |
-| `gu_zu` | 1950 | 1.1199 | 0.357 | 31.908% | 9.821e-05 | 0.528523 | 0.0583 | 0.0008199 | +1.63 | 0.12x | 0.03x |
-| `qqbar_zg` | 250 | 267.595 | 38.6 | 14.412% | 0.0004812 | 191.882 | 29.2 | 0.0004326 | +1.57 | 1.11x | 0.57x |
-| `qqbar_zg` | 400 | 89.6803 | 9.72 | 10.841% | 0.0008502 | 217.472 | 92.7 | 5.507e-05 | -1.37 | 15.44x | 90.85x |
-| `qqbar_zg` | 650 | 55.3051 | 17.3 | 31.243% | 0.0001024 | 43.8478 | 13.3 | 0.0001086 | +0.53 | 0.94x | 0.59x |
-| `qqbar_zg` | 1000 | 11.7523 | 0.461 | 3.920% | 0.006465 | 9.37643 | 0.864 | 0.001177 | +2.43 | 5.49x | 3.51x |
-| `qqbar_zg` | 1500 | 6.64173 | 0.476 | 7.164% | 0.001945 | 7.35178 | 1.91 | 0.0001486 | -0.36 | 13.08x | 16.06x |
-| `qqbar_zg` | 1950 | 4.6088 | 0.917 | 19.904% | 0.0002523 | 2.84589 | 0.347 | 0.0006711 | +1.80 | 0.38x | 0.14x |
+| `gu_zu (no cuts)` | 250 | 39.4995 | 7.85 | 19.878% | 0.000253 | 23.4245 | 1.75 | 0.00179 | +2.00 | 0.14x | 0.05x |
+| `gu_zu (no cuts)` | 400 | 14.4514 | 0.843 | 5.834% | 0.002929 | 25.4693 | 11.6 | 4.795e-05 | -0.94 | 61.09x | 190.30x |
+| `gu_zu (no cuts)` | 650 | 12.9994 | 5.29 | 40.709% | 6.034e-05 | 11.99 | 4.67 | 6.586e-05 | +0.14 | 0.92x | 0.78x |
+| `gu_zu (no cuts)` | 1000 | 2.40419 | 0.108 | 4.480% | 0.004958 | 1.8521 | 0.254 | 0.0005332 | +2.00 | 9.30x | 5.54x |
+| `gu_zu (no cuts)` | 1500 | 1.34645 | 0.159 | 11.792% | 0.0007186 | 1.82362 | 0.668 | 7.445e-05 | -0.69 | 9.65x | 17.72x |
+| `gu_zu (no cuts)` | 1950 | 1.1199 | 0.357 | 31.908% | 9.821e-05 | 0.528523 | 0.0583 | 0.0008199 | +1.63 | 0.12x | 0.03x |
+| `qqbar_zg (no cuts)` | 250 | 267.595 | 38.6 | 14.412% | 0.0004812 | 191.882 | 29.2 | 0.0004326 | +1.57 | 1.11x | 0.57x |
+| `qqbar_zg (no cuts)` | 400 | 89.6803 | 9.72 | 10.841% | 0.0008502 | 217.472 | 92.7 | 5.507e-05 | -1.37 | 15.44x | 90.85x |
+| `qqbar_zg (no cuts)` | 650 | 55.3051 | 17.3 | 31.243% | 0.0001024 | 43.8478 | 13.3 | 0.0001086 | +0.53 | 0.94x | 0.59x |
+| `qqbar_zg (no cuts)` | 1000 | 11.7523 | 0.461 | 3.920% | 0.006465 | 9.37643 | 0.864 | 0.001177 | +2.43 | 5.49x | 3.51x |
+| `qqbar_zg (no cuts)` | 1500 | 6.64173 | 0.476 | 7.164% | 0.001945 | 7.35178 | 1.91 | 0.0001486 | -0.36 | 13.08x | 16.06x |
+| `qqbar_zg (no cuts)` | 1950 | 4.6088 | 0.917 | 19.904% | 0.0002523 | 2.84589 | 0.347 | 0.0006711 | +1.80 | 0.38x | 0.14x |
+| `gu_zu (pt/eta cuts)` | 250 | 10.3993 | 0.014 | 0.135% | 0.8461 | 10.484 | 0.0571 | 0.2522 | -1.44 | 3.35x | 16.57x |
+| `gu_zu (pt/eta cuts)` | 400 | 4.82777 | 0.00845 | 0.175% | 0.7656 | 4.89945 | 0.0307 | 0.2028 | -2.25 | 3.78x | 13.23x |
+| `gu_zu (pt/eta cuts)` | 650 | 1.92784 | 0.00316 | 0.164% | 0.7879 | 1.93677 | 0.0122 | 0.2018 | -0.71 | 3.90x | 14.83x |
+| `gu_zu (pt/eta cuts)` | 1000 | 0.827631 | 0.00112 | 0.135% | 0.8462 | 0.8365 | 0.00528 | 0.2005 | -1.64 | 4.22x | 22.42x |
+| `gu_zu (pt/eta cuts)` | 1500 | 0.371298 | 0.000363 | 0.098% | 0.9128 | 0.373584 | 0.00235 | 0.2011 | -0.96 | 4.54x | 42.09x |
+| `gu_zu (pt/eta cuts)` | 1950 | 0.220198 | 0.00022 | 0.100% | 0.9089 | 0.220777 | 0.00139 | 0.2017 | -0.41 | 4.51x | 39.72x |
+| `qqbar_zg (pt/eta cuts)` | 250 | 61.541 | 0.0951 | 0.155% | 0.8072 | 61.791 | 0.307 | 0.2882 | -0.78 | 2.80x | 10.43x |
+| `qqbar_zg (pt/eta cuts)` | 400 | 22.1756 | 0.0411 | 0.186% | 0.7439 | 22.4817 | 0.127 | 0.2376 | -2.29 | 3.13x | 9.58x |
+| `qqbar_zg (pt/eta cuts)` | 650 | 7.98525 | 0.0147 | 0.185% | 0.7457 | 8.06598 | 0.0462 | 0.2336 | -1.66 | 3.19x | 9.82x |
+| `qqbar_zg (pt/eta cuts)` | 1000 | 3.31509 | 0.00584 | 0.176% | 0.763 | 3.3427 | 0.0193 | 0.2305 | -1.37 | 3.31x | 10.93x |
+| `qqbar_zg (pt/eta cuts)` | 1500 | 1.46383 | 0.00224 | 0.153% | 0.8099 | 1.47672 | 0.00855 | 0.2297 | -1.46 | 3.53x | 14.54x |
+| `qqbar_zg (pt/eta cuts)` | 1950 | 0.865088 | 0.00117 | 0.135% | 0.8459 | 0.867489 | 0.00503 | 0.2292 | -0.46 | 3.69x | 18.57x |
 | `gg_zuubar` | 250 | 0.291168 | 0.000868 | 0.298% | 0.5296 | 0.292412 | 0.00151 | 0.2728 | -0.71 | 1.94x | 3.03x |
 | `gg_zuubar` | 400 | 0.364317 | 0.000923 | 0.253% | 0.6091 | 0.362505 | 0.00266 | 0.1568 | +0.64 | 3.88x | 8.29x |
 | `gg_zuubar` | 650 | 0.250133 | 0.000625 | 0.250% | 0.616 | 0.252794 | 0.00213 | 0.1232 | -1.20 | 5.00x | 11.66x |
@@ -874,8 +892,10 @@ NF and uniform Monte Carlo each use 100,000 evaluations per energy. `pull = (NF 
 
 | process | pull range | NF ESS range | uniform ESS range | ESS ratio range | variance reduction range |
 |---|---:|---:|---:|---:|---:|
-| `gu_zu` | -0.94 … +2.00 | 6.034e-05 … 0.004958 | 4.795e-05 … 0.00179 | 0.12 … 61.09x | 0.03 … 190.30x |
-| `qqbar_zg` | -1.37 … +2.43 | 0.0001024 … 0.006465 | 5.507e-05 … 0.001177 | 0.38 … 15.44x | 0.14 … 90.85x |
+| `gu_zu (no cuts)` | -0.94 … +2.00 | 6.034e-05 … 0.004958 | 4.795e-05 … 0.00179 | 0.12 … 61.09x | 0.03 … 190.30x |
+| `qqbar_zg (no cuts)` | -1.37 … +2.43 | 0.0001024 … 0.006465 | 5.507e-05 … 0.001177 | 0.38 … 15.44x | 0.14 … 90.85x |
+| `gu_zu (pt/eta cuts)` | -2.25 … -0.41 | 0.7656 … 0.9128 | 0.2005 … 0.2522 | 3.35 … 4.54x | 13.23 … 42.09x |
+| `qqbar_zg (pt/eta cuts)` | -2.29 … -0.46 | 0.7439 … 0.8459 | 0.2292 … 0.2882 | 2.80 … 3.69x | 9.58 … 18.57x |
 | `gg_zuubar` | -1.20 … +0.83 | 0.5296 … 0.616 | 0.07593 … 0.2728 | 1.94 … 7.54x | 3.03 … 16.21x |
 | `gu_zug` | -1.50 … +0.89 | 0.4709 … 0.5274 | 0.002306 … 0.09192 | 5.12 … 222.93x | 8.95 … 533.20x |
 | `qqbar_zgg` | -0.96 … +1.61 | 0.1442 … 0.4591 | 0.006727 … 0.1587 | 2.89 … 21.44x | 4.49 … 26.87x |
@@ -886,5 +906,7 @@ NF and uniform Monte Carlo each use 100,000 evaluations per energy. `pull = (NF 
 - These are **smoke** models (300 KL steps), not production results. The held-out estimates are accurate enough to verify the pipeline, but the ESS and error bars are below what the balanced/thorough profiles deliver.
 - `gg_zuubar` is the same partonic process as the existing `gg_zjj` configuration (`g g > z u u~ @1`), with the same 5-D phase space and cuts; it is a duplicate channel under a new name. Its smoke metrics should therefore be statistically similar to the `gg_zjj` smoke.
 - `@1` is MadGraph's diagram filter. It keeps each standalone to one subprocess, which `MadGraphMatrixElement` requires, but it also selects a subset of the tree-level diagrams for these channels. These configs are for pipeline smoke tests; a production physics comparison should confirm whether the full LO amplitude is needed.
-- **The 2-D smoke models fail to resolve the uncut t-channel singularity.** `gu_zu` and `qqbar_zg` have no `cuts` block, so the collinear/soft region is unsuppressed. The matrix element itself is valid, but the 300-step proposal reaches held-out ESS of only 1e-4 to 7e-3, at several energies below the uniform baseline, with 4-41% relative errors and pulls up to 2.4 sigma. The 2-D estimates are therefore not converged. Adding `pt_j > 20` and `abs(eta_j) < 2.5` cuts (the same cuts the 5-D configs use), or training at balanced/thorough, is the next step for these channels.
 - The reference is uniform Monte Carlo at the same 100k budget, not Sobol. Scrambled Sobol remains the build-level cross-check for future validation runs.
+- **gu_zu: cuts vs no cuts.** Mean held-out NF ESS 0.0015 -> 0.845; mean relative stderr 19.10% -> 0.13%; largest cut-run |pull| 2.25 sigma. The cut removes the forward/soft region that dominates the uncut integral: at 250 GeV the NF estimate moves from 39.5 pb (no cuts) to 10.4 pb (cuts). Both are valid but different observables. The uncut rows are retained as the baseline.
+- **qqbar_zg: cuts vs no cuts.** Mean held-out NF ESS 0.00168 -> 0.786; mean relative stderr 14.58% -> 0.16%; largest cut-run |pull| 2.29 sigma. The cut removes the forward/soft region that dominates the uncut integral: at 250 GeV the NF estimate moves from 267.6 pb (no cuts) to 61.54 pb (cuts). Both are valid but different observables. The uncut rows are retained as the baseline.
+- The 2-D cut runs agree with uniform MC at the ~1 sigma level at most energies; the largest deviation is -2.3 sigma at 400 GeV in both channels. With six energies that is not decisive, but it is the one point worth an independent higher-statistics/Sobol check before a production claim.

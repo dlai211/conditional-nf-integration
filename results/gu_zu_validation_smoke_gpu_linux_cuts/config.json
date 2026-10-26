@@ -1,0 +1,24 @@
+{
+  "config": "/home/users/dlai/conditional-nf-integration/configs/processes/gu_zu.json",
+  "checkpoint": "/home/users/dlai/conditional-nf-integration/results/gu_zu_copula_smoke_gpu_linux_cuts/madgraph_gu_zu_2_final_model.pt",
+  "energies": null,
+  "sobol_power": 18,
+  "sobol_replicates": 8,
+  "nf_evals": 100000,
+  "gpu_chunk": 20000,
+  "uniform_fraction": 0.1,
+  "alpha_s": 0.118,
+  "seed": 20260920,
+  "device": "cuda",
+  "no_sobol": true,
+  "compare_uniform": true,
+  "output": "/home/users/dlai/conditional-nf-integration/results/gu_zu_validation_smoke_gpu_linux_cuts",
+  "resolved_energies": [
+    250.0,
+    400.0,
+    650.0,
+    1000.0,
+    1500.0,
+    1950.0
+  ]
+}
