@@ -1,0 +1,23 @@
+{
+  "name": "qqbar_zg",
+  "description": "Quark-antiquark annihilation Z + 1 jet (u u~ > z g), partonic two-body.",
+  "model": "sm",
+  "process": "u u~ > z g @1",
+  "standalone": "generated/qqbar_zg_standalone",
+  "phase_space": {
+    "type": "two_body",
+    "dimension": 2,
+    "final_pdgs": [23, 21],
+    "cuts": {
+      "jet_indices": [1],
+      "pt_j_min": 20.0,
+      "eta_j_max": 2.5
+    }
+  },
+  "condition": {
+    "name": "sqrt_s_hat_gev",
+    "minimum": 200.0,
+    "maximum": 2000.0,
+    "held_out": [250.0, 400.0, 650.0, 1000.0, 1500.0, 1950.0]
+  }
+}

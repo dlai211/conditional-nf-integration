@@ -1,0 +1,54 @@
+{
+  "name": "qqbar_zgg",
+  "description": "Quark-antiquark annihilation Z + 2 jets (u u~ > z g g), partonic three-body.",
+  "model": "sm",
+  "process": "u u~ > z g g @1",
+  "standalone": "generated/qqbar_zgg_standalone",
+  "phase_space": {
+    "type": "three_body",
+    "dimension": 5,
+    "final_pdgs": [
+      23,
+      21,
+      21
+    ],
+    "cuts": {
+      "jet_indices": [
+        1,
+        2
+      ],
+      "pt_j_min": 20.0,
+      "eta_j_max": 2.5,
+      "dr_jj_min": 0.4,
+      "m_jj_min": 20.0
+    }
+  },
+  "condition": {
+    "name": "sqrt_s_hat_gev",
+    "minimum": 200.0,
+    "maximum": 2000.0,
+    "held_out": [
+      250.0,
+      400.0,
+      650.0,
+      1000.0,
+      1500.0,
+      1950.0
+    ]
+  },
+  "config": "/storage/users/dlai/conditional-nf-integration/configs/processes/qqbar_zgg.json",
+  "libraries": [
+    "/storage/users/dlai/conditional-nf-integration/generated/qqbar_zgg_standalone/SubProcesses/P1_uux_zgg/matrix2py.cpython-310-x86_64-linux-gnu.so",
+    "/storage/users/dlai/conditional-nf-integration/generated/qqbar_zgg_standalone/SubProcesses/P1_uux_zgg/matrix2py.so"
+  ],
+  "madgraph_api": [
+    {
+      "module": "matrix2py",
+      "directory": "/storage/users/dlai/conditional-nf-integration/generated/qqbar_zgg_standalone/SubProcesses/P1_uux_zgg"
+    },
+    {
+      "module": "matrix2py",
+      "directory": "/storage/users/dlai/conditional-nf-integration/generated/qqbar_zgg_standalone/SubProcesses/P1_uux_zgg"
+    }
+  ]
+}

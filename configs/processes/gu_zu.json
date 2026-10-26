@@ -1,0 +1,23 @@
+{
+  "name": "gu_zu",
+  "description": "Gluon-quark scattering Z + 1 jet (g u > z u), partonic two-body.",
+  "model": "sm",
+  "process": "g u > z u @1",
+  "standalone": "generated/gu_zu_standalone",
+  "phase_space": {
+    "type": "two_body",
+    "dimension": 2,
+    "final_pdgs": [23, 2],
+    "cuts": {
+      "jet_indices": [1],
+      "pt_j_min": 20.0,
+      "eta_j_max": 2.5
+    }
+  },
+  "condition": {
+    "name": "sqrt_s_hat_gev",
+    "minimum": 200.0,
+    "maximum": 2000.0,
+    "held_out": [250.0, 400.0, 650.0, 1000.0, 1500.0, 1950.0]
+  }
+}

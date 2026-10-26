@@ -781,3 +781,110 @@ python scripts/compare_validation.py \
     --mine results/gg_ttbar_validation_smoke \
     --theirs results_public/gg_ttbar_validation
 ```
+
+---
+
+## 8. Z + jets smoke campaign — Linux/ROCm (2026-10-26)
+
+Six partonic Z + jets configurations were built and smoke-trained on the `odyssey` node (4x AMD Instinct MI300A, torch 2.5.1+rocm6.2, MadGraph 3.6.7). Training used `--speed-profile smoke --device cuda --me-workers 16`; each held-out validation used `--nf-evals 100000 --no-sobol --compare-uniform`, so the reference is an equal-budget uniform Monte Carlo, not randomized Sobol.
+
+### 8.1 Processes
+
+| config | process | dim | final PDGs | jet cuts |
+|---|---|---:|---|---|
+| `gu_zu.json` | `g u > z u @1` | 2 | [23, 2] | none |
+| `qqbar_zg.json` | `u u~ > z g @1` | 2 | [23, 21] | none |
+| `gg_zuubar.json` | `g g > z u u~ @1` | 5 | [23, 2, -2] | pt 20, abs(eta) 2.5, dR 0.4, m_jj 20 |
+| `gu_zug.json` | `g u > z u g @1` | 5 | [23, 2, 21] | pt 20, abs(eta) 2.5, dR 0.4, m_jj 20 |
+| `qqbar_zgg.json` | `u u~ > z g g @1` | 5 | [23, 21, 21] | pt 20, abs(eta) 2.5, dR 0.4, m_jj 20 |
+| `uu_zuu.json` | `u u > z u u @1` | 5 | [23, 2, 2] | pt 20, abs(eta) 2.5, dR 0.4, m_jj 20 |
+
+The four 5-D processes use the standard jet cuts and condition `sqrt(s_hat) in [200, 2000] GeV`; the two 2-D processes use the same condition and no jet cuts (the two-body phase-space class does not apply them). Held-out energies are 250, 400, 650, 1000, 1500 and 1950 GeV.
+
+### 8.2 Standalone build and integrand validation
+
+`validate_madgraph_process_integrand.py --points 500`:
+
+| process | dim | max 4-momentum residual | max mass-shell residual | min Jacobian | finite fraction | cut-rejected fraction | points/s |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `gu_zu` | 2 | 2.274e-13 | 3.602e-10 | 0.0316673 | 1 | 0 | 77,457 |
+| `qqbar_zg` | 2 | 2.274e-13 | 3.602e-10 | 0.0316673 | 1 | 0 | 94,500 |
+| `gg_zuubar` | 5 | 6.821e-13 | 3.602e-10 | 0.187294 | 1 | 0.07 | 19,236 |
+| `gu_zug` | 5 | 6.821e-13 | 3.602e-10 | 0.187294 | 1 | 0.07 | 19,451 |
+| `qqbar_zgg` | 5 | 6.821e-13 | 3.602e-10 | 0.187294 | 1 | 0.07 | 19,497 |
+| `uu_zuu` | 5 | 6.821e-13 | 3.602e-10 | 0.187294 | 1 | 0.07 | 26,673 |
+
+All six have finite momenta, positive Jacobians and a fully finite integrand. The 5-D cut-rejected fraction is 7% at random points; the 2-D configs apply no cuts.
+
+### 8.3 Smoke training
+
+| process | dim | edges | ESS | Ihat (GeV^-2) | log w std | wall |
+|---|---:|---:|---:|---:|---:|---:|
+| `gu_zu` | 2 | 1 | 0.009237 | 1.65304990e-08 | 1.241441 | 1m35.515s |
+| `qqbar_zg` | 2 | 1 | 0.014961 | 9.17253501e-08 | 1.374604 | 1m44.740s |
+| `gg_zuubar` | 5 | 10 | 0.465148 | 4.35782187e-10 | 0.814323 | 4m34.322s |
+| `gu_zug` | 5 | 10 | 0.443344 | 1.73955431e-08 | 0.750414 | 4m45.083s |
+| `qqbar_zgg` | 5 | 10 | 0.196134 | 1.67528378e-08 | 1.159202 | 4m57.086s |
+| `uu_zuu` | 5 | 10 | 0.450087 | 9.85523372e-09 | 0.712936 | 5m22.811s |
+
+Smoke is 300 KL steps: these numbers check the pipeline, not production accuracy. `std_logw` is computed over finite weights and is finite for every process.
+
+### 8.4 Held-out validation (no Sobol, equal-budget uniform)
+
+NF and uniform Monte Carlo each use 100,000 evaluations per energy. `pull = (NF - uniform) / sqrt(sigma_NF^2 + sigma_uniform^2)`.
+
+| process | E (GeV) | NF (pb) | NF stderr | NF rel. | NF ESS | uniform (pb) | uniform stderr | uniform ESS | pull | ESS ratio | variance reduction |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `gu_zu` | 250 | 39.4995 | 7.85 | 19.878% | 0.000253 | 23.4245 | 1.75 | 0.00179 | +2.00 | 0.14x | 0.05x |
+| `gu_zu` | 400 | 14.4514 | 0.843 | 5.834% | 0.002929 | 25.4693 | 11.6 | 4.795e-05 | -0.94 | 61.09x | 190.30x |
+| `gu_zu` | 650 | 12.9994 | 5.29 | 40.709% | 6.034e-05 | 11.99 | 4.67 | 6.586e-05 | +0.14 | 0.92x | 0.78x |
+| `gu_zu` | 1000 | 2.40419 | 0.108 | 4.480% | 0.004958 | 1.8521 | 0.254 | 0.0005332 | +2.00 | 9.30x | 5.54x |
+| `gu_zu` | 1500 | 1.34645 | 0.159 | 11.792% | 0.0007186 | 1.82362 | 0.668 | 7.445e-05 | -0.69 | 9.65x | 17.72x |
+| `gu_zu` | 1950 | 1.1199 | 0.357 | 31.908% | 9.821e-05 | 0.528523 | 0.0583 | 0.0008199 | +1.63 | 0.12x | 0.03x |
+| `qqbar_zg` | 250 | 267.595 | 38.6 | 14.412% | 0.0004812 | 191.882 | 29.2 | 0.0004326 | +1.57 | 1.11x | 0.57x |
+| `qqbar_zg` | 400 | 89.6803 | 9.72 | 10.841% | 0.0008502 | 217.472 | 92.7 | 5.507e-05 | -1.37 | 15.44x | 90.85x |
+| `qqbar_zg` | 650 | 55.3051 | 17.3 | 31.243% | 0.0001024 | 43.8478 | 13.3 | 0.0001086 | +0.53 | 0.94x | 0.59x |
+| `qqbar_zg` | 1000 | 11.7523 | 0.461 | 3.920% | 0.006465 | 9.37643 | 0.864 | 0.001177 | +2.43 | 5.49x | 3.51x |
+| `qqbar_zg` | 1500 | 6.64173 | 0.476 | 7.164% | 0.001945 | 7.35178 | 1.91 | 0.0001486 | -0.36 | 13.08x | 16.06x |
+| `qqbar_zg` | 1950 | 4.6088 | 0.917 | 19.904% | 0.0002523 | 2.84589 | 0.347 | 0.0006711 | +1.80 | 0.38x | 0.14x |
+| `gg_zuubar` | 250 | 0.291168 | 0.000868 | 0.298% | 0.5296 | 0.292412 | 0.00151 | 0.2728 | -0.71 | 1.94x | 3.03x |
+| `gg_zuubar` | 400 | 0.364317 | 0.000923 | 0.253% | 0.6091 | 0.362505 | 0.00266 | 0.1568 | +0.64 | 3.88x | 8.29x |
+| `gg_zuubar` | 650 | 0.250133 | 0.000625 | 0.250% | 0.616 | 0.252794 | 0.00213 | 0.1232 | -1.20 | 5.00x | 11.66x |
+| `gg_zuubar` | 1000 | 0.155313 | 0.000391 | 0.252% | 0.6116 | 0.154122 | 0.00137 | 0.1118 | +0.83 | 5.47x | 12.32x |
+| `gg_zuubar` | 1500 | 0.0932756 | 0.000237 | 0.254% | 0.6077 | 0.0939742 | 0.000941 | 0.09061 | -0.72 | 6.71x | 15.78x |
+| `gg_zuubar` | 1950 | 0.0658615 | 0.00018 | 0.273% | 0.5723 | 0.0657108 | 0.000725 | 0.07593 | +0.20 | 7.54x | 16.21x |
+| `gu_zug` | 250 | 7.66896 | 0.0257 | 0.335% | 0.4709 | 7.73845 | 0.0769 | 0.09192 | -0.86 | 5.12x | 8.95x |
+| `gu_zug` | 400 | 11.044 | 0.0358 | 0.324% | 0.4877 | 10.8517 | 0.219 | 0.02404 | +0.87 | 20.29x | 37.31x |
+| `gu_zug` | 650 | 9.40122 | 0.0311 | 0.330% | 0.4782 | 9.45959 | 0.271 | 0.01208 | -0.21 | 39.59x | 75.90x |
+| `gu_zug` | 1000 | 6.92904 | 0.0213 | 0.307% | 0.514 | 7.05995 | 0.263 | 0.007155 | -0.50 | 71.84x | 152.35x |
+| `gu_zug` | 1500 | 4.87194 | 0.0146 | 0.299% | 0.5274 | 5.37683 | 0.337 | 0.002543 | -1.50 | 207.41x | 533.20x |
+| `gu_zug` | 1950 | 3.7903 | 0.0117 | 0.307% | 0.5142 | 3.57958 | 0.235 | 0.002306 | +0.89 | 222.93x | 408.31x |
+| `qqbar_zgg` | 250 | 19.8641 | 0.0682 | 0.343% | 0.4591 | 19.8365 | 0.144 | 0.1587 | +0.17 | 2.89x | 4.49x |
+| `qqbar_zgg` | 400 | 15.5398 | 0.0595 | 0.383% | 0.4054 | 15.4473 | 0.182 | 0.06729 | +0.48 | 6.02x | 9.34x |
+| `qqbar_zgg` | 650 | 8.77946 | 0.0461 | 0.525% | 0.266 | 8.83038 | 0.162 | 0.02881 | -0.30 | 9.23x | 12.36x |
+| `qqbar_zgg` | 1000 | 4.83502 | 0.0289 | 0.598% | 0.2183 | 4.68244 | 0.13 | 0.01287 | +1.15 | 16.96x | 20.09x |
+| `qqbar_zgg` | 1500 | 2.65833 | 0.0205 | 0.770% | 0.1442 | 2.76236 | 0.106 | 0.006727 | -0.96 | 21.44x | 26.87x |
+| `qqbar_zgg` | 1950 | 1.7568 | 0.0133 | 0.758% | 0.1482 | 1.68191 | 0.0445 | 0.01411 | +1.61 | 10.50x | 11.14x |
+| `uu_zuu` | 250 | 2.53056 | 0.00847 | 0.335% | 0.4719 | 2.55708 | 0.0275 | 0.07977 | -0.92 | 5.92x | 10.53x |
+| `uu_zuu` | 400 | 5.20849 | 0.0196 | 0.377% | 0.4133 | 5.08724 | 0.0882 | 0.03222 | +1.34 | 12.83x | 20.18x |
+| `uu_zuu` | 650 | 5.27033 | 0.0191 | 0.362% | 0.4322 | 5.38484 | 0.139 | 0.01472 | -0.81 | 29.37x | 53.21x |
+| `uu_zuu` | 1000 | 4.30789 | 0.0144 | 0.333% | 0.4737 | 4.31231 | 0.127 | 0.01144 | -0.03 | 41.43x | 77.98x |
+| `uu_zuu` | 1500 | 3.2656 | 0.0106 | 0.325% | 0.4871 | 3.3943 | 0.126 | 0.007179 | -1.02 | 67.85x | 141.89x |
+| `uu_zuu` | 1950 | 2.63476 | 0.00895 | 0.340% | 0.4642 | 2.58726 | 0.111 | 0.005377 | +0.43 | 86.33x | 154.52x |
+
+| process | pull range | NF ESS range | uniform ESS range | ESS ratio range | variance reduction range |
+|---|---:|---:|---:|---:|---:|
+| `gu_zu` | -0.94 … +2.00 | 6.034e-05 … 0.004958 | 4.795e-05 … 0.00179 | 0.12 … 61.09x | 0.03 … 190.30x |
+| `qqbar_zg` | -1.37 … +2.43 | 0.0001024 … 0.006465 | 5.507e-05 … 0.001177 | 0.38 … 15.44x | 0.14 … 90.85x |
+| `gg_zuubar` | -1.20 … +0.83 | 0.5296 … 0.616 | 0.07593 … 0.2728 | 1.94 … 7.54x | 3.03 … 16.21x |
+| `gu_zug` | -1.50 … +0.89 | 0.4709 … 0.5274 | 0.002306 … 0.09192 | 5.12 … 222.93x | 8.95 … 533.20x |
+| `qqbar_zgg` | -0.96 … +1.61 | 0.1442 … 0.4591 | 0.006727 … 0.1587 | 2.89 … 21.44x | 4.49 … 26.87x |
+| `uu_zuu` | -1.02 … +1.34 | 0.4133 … 0.4871 | 0.005377 … 0.07977 | 5.92 … 86.33x | 10.53 … 154.52x |
+
+### 8.5 Notes
+
+- These are **smoke** models (300 KL steps), not production results. The held-out estimates are accurate enough to verify the pipeline, but the ESS and error bars are below what the balanced/thorough profiles deliver.
+- `gg_zuubar` is the same partonic process as the existing `gg_zjj` configuration (`g g > z u u~ @1`), with the same 5-D phase space and cuts; it is a duplicate channel under a new name. Its smoke metrics should therefore be statistically similar to the `gg_zjj` smoke.
+- `@1` is MadGraph's diagram filter. It keeps each standalone to one subprocess, which `MadGraphMatrixElement` requires, but it also selects a subset of the tree-level diagrams for these channels. These configs are for pipeline smoke tests; a production physics comparison should confirm whether the full LO amplitude is needed.
+- **The 2-D smoke models fail to resolve the uncut t-channel singularity.** `gu_zu` and `qqbar_zg` have no `cuts` block, so the collinear/soft region is unsuppressed. The matrix element itself is valid, but the 300-step proposal reaches held-out ESS of only 1e-4 to 7e-3, at several energies below the uniform baseline, with 4-41% relative errors and pulls up to 2.4 sigma. The 2-D estimates are therefore not converged. Adding `pt_j > 20` and `abs(eta_j) < 2.5` cuts (the same cuts the 5-D configs use), or training at balanced/thorough, is the next step for these channels.
+- The reference is uniform Monte Carlo at the same 100k budget, not Sobol. Scrambled Sobol remains the build-level cross-check for future validation runs.
