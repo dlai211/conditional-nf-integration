@@ -14,7 +14,34 @@ import numpy as np
 from madgraph_tth_integrand import _breit_wigner_q2, _two_body, read_slha_masses_widths
 
 
-def load_process_spec(path: Path) -> dict[str, Any]:
+def select_channel_spec(spec: dict[str, Any], channel: str) -> dict[str, Any]:
+    """Merge one entry of ``spec['channels']`` into a single-process spec.
+
+    The hadronic ``p p > z j`` standalone contains several subprocess
+    directories.  Each NF is trained for one subprocess group, so the
+    training/validation code needs a spec whose ``process``, ``final_pdgs``
+    and ``subprocess`` fields are those of the selected channel.
+    """
+    channels = spec.get("channels")
+    if not channels:
+        raise ValueError(f"Process specification has no channels; cannot select {channel!r}")
+    match = next((item for item in channels if item.get("name") == channel), None)
+    if match is None:
+        available = [item.get("name") for item in channels]
+        raise ValueError(f"Unknown channel {channel!r}; available: {available}")
+    merged = {**spec, **match}
+    merged["name"] = f"{spec['name']}_{match['name']}"
+    merged["channel"] = match["name"]
+    merged["subprocess"] = match["pdir"]
+    merged["phase_space"] = {
+        **spec["phase_space"],
+        "final_pdgs": match["final_pdgs"],
+    }
+    merged.pop("channels", None)
+    return merged
+
+
+def load_process_spec(path: Path, channel: str | None = None) -> dict[str, Any]:
     spec = json.loads(Path(path).read_text(encoding="utf-8"))
     required = {"name", "process", "phase_space", "condition", "standalone"}
     missing = sorted(required - set(spec))
@@ -25,31 +52,51 @@ def load_process_spec(path: Path) -> dict[str, Any]:
         raise ValueError("Only condition.name='sqrt_s_hat_gev' is currently supported")
     if float(condition["maximum"]) <= float(condition["minimum"]):
         raise ValueError("condition.maximum must exceed condition.minimum")
+    if channel is not None:
+        spec = select_channel_spec(spec, channel)
     return spec
 
 
 class MadGraphMatrixElement:
     """Load one per-process MadGraph f2py matrix-element library."""
 
-    def __init__(self, standalone: Path, alpha_s: float = 0.118):
+    def __init__(
+        self,
+        standalone: Path,
+        alpha_s: float = 0.118,
+        subprocess: str | None = None,
+    ):
         self.standalone = Path(standalone).resolve()
         self.param_card = self.standalone / "Cards" / "param_card.dat"
         # The upstream loader globs only "*.so" (the POSIX/MadGraph default).
         # Windows builds of the f2py wrapper land as "matrix2py.cp310-win_amd64.pyd"
         # instead, so accept both extensions.  See RUNBOOK.md section 3.
         subprocesses = self.standalone / "SubProcesses"
-        libraries = sorted(
-            list(subprocesses.glob("P*/matrix2py*.so"))
-            + list(subprocesses.glob("P*/matrix2py*.pyd"))
-        )
-        if not libraries:
-            raise FileNotFoundError(f"No matrix2py library below {self.standalone}")
-        process_directories = sorted({item.parent.resolve() for item in libraries})
-        if len(process_directories) != 1:
-            raise RuntimeError(
-                "A process specification must resolve to exactly one subprocess; "
-                f"found {[str(item) for item in process_directories]}"
+        if subprocess:
+            # A multi-subprocess standalone (e.g. `p p > z j`) has one P*
+            # directory per partonic subprocess group.  The caller selects
+            # one explicitly; the param card remains the standalone's.
+            process_root = (subprocesses / subprocess).resolve()
+            libraries = sorted(
+                list(process_root.glob("matrix2py*.so"))
+                + list(process_root.glob("matrix2py*.pyd"))
             )
+            if not libraries:
+                raise FileNotFoundError(f"No matrix2py library below {process_root}")
+            process_directories = [process_root]
+        else:
+            libraries = sorted(
+                list(subprocesses.glob("P*/matrix2py*.so"))
+                + list(subprocesses.glob("P*/matrix2py*.pyd"))
+            )
+            if not libraries:
+                raise FileNotFoundError(f"No matrix2py library below {self.standalone}")
+            process_directories = sorted({item.parent.resolve() for item in libraries})
+            if len(process_directories) != 1:
+                raise RuntimeError(
+                    "A process specification must resolve to exactly one subprocess; "
+                    f"found {[str(item) for item in process_directories]}"
+                )
         candidates = [item for item in libraries if item.parent.resolve() == process_directories[0]]
         versioned = [item for item in candidates if "cpython-" in item.name]
         self.library = versioned[0] if versioned else candidates[0]
@@ -312,7 +359,9 @@ class ConfiguredMadGraphIntegrand:
         standalone = Path(spec["standalone"])
         if not standalone.is_absolute():
             standalone = Path(root) / standalone
-        self.matrix_element = MadGraphMatrixElement(standalone, alpha_s=alpha_s)
+        self.matrix_element = MadGraphMatrixElement(
+            standalone, alpha_s=alpha_s, subprocess=spec.get("subprocess")
+        )
         phase = spec["phase_space"]
         self.cuts = phase.get("cuts", {})
         phase_spaces = {

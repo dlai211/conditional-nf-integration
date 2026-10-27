@@ -5,12 +5,13 @@ its structure and how to actually run it. Everything below is a record of what
 was tested on this machine, what worked, what failed, and what was too slow to
 finish.
 
-This document now has two parts, written on two different machines:
+This document now has three parts, written on three different machines:
 
 | part | machine | date | scope |
 |---|---|---|---|
 | **Part I** (§0–§9) | Windows 11, conda `workspace`, CPU-only torch | 2026-10-08 | repository reconnaissance and synthetic smoke runs; **no MadGraph** — that was the blocker |
 | **Part II** (§10–§17) | CERN Linux node, EOS home, dedicated `python3.11` venv | 2026-10-08 → 2026-10-09 | MadGraph 3.6.7 installed and working; **the scattering results are now reproducible end to end** |
+| **Part III** (§18–§22) | Linux/ROCm `odyssey` node, MG5 3.6.7, torch 2.5.1+rocm6.2 | 2026-10-26 | one-jet NF/Sobol/MadEvent validation; why `p p > z j` cannot run as-is; two proposed pipeline changes (each with both energy-range options); MadEvent energy-slice diagnostic |
 
 Part I's conclusions about the *code* all still hold. Its central blocker — no
 MadGraph — is **resolved in Part II**. Read Part II first if you are here for
@@ -1209,3 +1210,426 @@ generated/gg_ttbar_standalone/             MG5 standalone + matrix2py.so
 results/gg_ttbar_copula_smoke/             smoke checkpoint + summary
 results/gg_ttbar_validation_smoke/         held-out NF vs Sobol results
 ```
+
+---
+
+# Part III — Z + jets hadronic extension (Linux/ROCm, 2026-10-26)
+
+This part records the one-jet validation, why `p p > z j` cannot be run by the
+NF pipeline as-is, the two proposed pipeline changes, both energy-range
+options for each, and the MadEvent slice diagnostic that fixes the training
+range.
+
+## 18. Why `p p > z j` cannot run as-is
+
+MG5 generates `p p > z j`; the NF pipeline cannot consume it.
+
+Scratch generation (MG5 3.6.7, `sm` model):
+
+```bash
+source /storage/users/dlai/mango-linux/env_linux.sh
+mkdir -p /storage/users/dlai/mango-linux/scratch_ppzj
+cat > /storage/users/dlai/mango-linux/scratch_ppzj/gen.mg5 <<'EOF'
+set automatic_html_opening False
+import model sm
+generate p p > z j
+output standalone /storage/users/dlai/mango-linux/scratch_ppzj/standalone --prefix=int
+EOF
+/storage/users/dlai/mango-linux/bin/mg5_aMC \
+  /storage/users/dlai/mango-linux/scratch_ppzj/gen.mg5
+```
+
+MG5 expands it to **12 partonic processes in 6 subprocess directories**
+(`P1_gu_zu`, `P1_gd_zd`, `P1_gux_zux`, `P1_gdx_zdx`, `P1_uux_zg`,
+`P1_ddx_zg`), 24 diagrams. The per-P `matrix2py` wrappers compile, and the NF
+loader then fails immediately:
+
+```
+RuntimeError: A process specification must resolve to exactly one subprocess;
+found [P1_ddx_zg, P1_gd_zd, P1_gdx_zdx, P1_gu_zu, P1_gux_zux, P1_uux_zg]
+```
+
+Why, structurally:
+
+1. `MadGraphMatrixElement` requires exactly one `P*/matrix2py*.so`; `p p > z j`
+   has six.
+2. The phase space is fixed 2→2 with one `final_pdgs` list. `j` is a
+   multiparticle sum (`g u c d s u~ c~ d~ s~`), not one final-state PDG.
+3. The integrand has **no PDF/beam layer**. It sets the initial momenta to
+   back-to-back partons at √ŝ. `p p` is a proton beam: the physical cross
+   section needs an x1,x2 PDF convolution and a sum over initial partons. The
+   NF conditions on partonic √ŝ, not hadronic s.
+4. A MadEvent `p p > z j` run with `lpp=1` is therefore a different observable
+   (PDF-convolved hadronic pb), not the partonic integral the NF estimates.
+
+The runnable unit is one partonic channel: **`g u > z u @1`**, which is exactly
+`P1_gu_zu`, one of the six subprocess groups that `p p > z j` expands to.
+Running the full hadronic process needs a new channel-index + PDF layer, not a
+config change.
+
+## 19. Proposed change 1 (Option 1): partonic NF + hadronic luminosity layer
+
+This is the smallest change that computes the physical `pp → Z + jet` cross
+section while reusing everything already validated at parton level.
+
+**The integral.** The existing NF estimates the partonic quantity at fixed √ŝ:
+
+\[
+\hat\sigma_c(\hat s)=\int d\Phi_2\,\frac{|M_c|^2}{2\hat s}
+\]
+
+The hadronic cross section is a one-dimensional convolution over √ŝ plus a sum
+over partonic channels:
+
+\[
+\sigma=\sum_c\int d\sqrt{\hat s}\;\frac{dL_c}{d\sqrt{\hat s}}\;\hat\sigma_c(\sqrt{\hat s}),
+\qquad
+\frac{dL_c}{d\sqrt{\hat s}}=\frac{2\sqrt{\hat s}}{s}\int dY\,f_{a_c}(x_1,\mu_F)f_{b_c}(x_2,\mu_F),
+\]
+
+with \(x_{1,2}=\sqrt{\hat s/s}\,e^{\pm Y}\) and
+\(|Y|\le \ln(\sqrt{s}/\sqrt{\hat s})\). The PDFs and the 1/s Jacobian are the
+only new physics; the flow still samples the 2-D partonic phase space at fixed
+√ŝ.
+
+**Code changes:**
+
+1. `madgraph_process_integrand.py`
+   - `MadGraphChannelSet`: load the multi-subprocess wrapper once and map a
+     channel index to its PDG order and matrix element. MG5 already generates
+     the interface for this — `SubProcesses/f2py_wrapper.f` contains
+     `SMATRIXHEL(PDGS, PROCID, NPDG, P, ALPHAS, SCALE2, NHEL, ANS)`,
+     `GET_PDG_ORDER`, and `GET_PREFIX`. The makefile rule for the combined
+     library is commented out in MG5 3.6.7, so either enable it or use one
+     worker process per P directory. The per-P `matrix2py` libraries cannot all
+     be imported under the same module name in one process.
+   - `PDFProvider` backed by LHAPDF (`lhapdf.mkPDF(...)`), with the PDF set and
+     member in the process config.
+   - `load_process_spec` accepts `beam: {"type": "pp", "sqrt_s": 13000}`, a
+     `channels` list, and a `pdf` block.
+
+2. New `experiments/integrate_hadronic_process.py`
+   - For each channel \(c\), evaluate the existing conditional NF on a
+     log-spaced √ŝ grid, multiply by the luminosity and sum.
+   - Combine the NF’s conditional error at each grid point with the luminosity
+     quadrature error.
+   - No change to the flow or to `run_madgraph_process_conditional_copula.py`.
+
+3. New `experiments/validate_hadronic_process_with_madevent.py` (or extend the
+   existing one)
+   - Generate `p p > z j` as a normal MadEvent process (`lpp1 = lpp2 = 1`,
+     `ebeam = 6500`), use the same PDF set, scale, and jet cuts, and compare
+     the total cross section and the jet-\(p_T\)/\(\eta\) distributions.
+   - This is the hadronic analogue of the `lpp=0` check we just ran for
+     `g u > z u @1`.
+
+4. `configs/processes/pp_zj.json`
+   - `process: "p p > z j"`, beam 13 TeV, PDF set, scale choice, channel list,
+     jet cuts.
+
+**Important caveats:**
+
+- The full `p p > z j` needs the **full LO amplitude**, not the `@1` diagram
+  filter. The current `gu_zu` model is `@1`; it validates the machinery but is
+  not the production amplitude.
+- The existing NF models are conditioned on √ŝ ∈ [200, 2000] GeV. The LHC
+  luminosity extends to 13 TeV; the total is dominated by low √ŝ, but the
+  high-√ŝ tail needs either an extended training range or a separate tail
+  integral.
+  **Correction (2026-10-26, §21):** the MadEvent slice measurement below shows
+  that **74% of the hadronic cross section lies below 200 GeV** (7.2% in
+  113.4–120 GeV, 66.8% in 120–200 GeV), while the 2–13 TeV tail is 0.0015%.
+  The training range must be extended **down to ~114 GeV**, not up to 13 TeV.
+- The PDF set must be consistent between the NF side and MadEvent, including
+  α_s(M_Z). The current NF uses fixed α_s = 0.118; choose a PDF set with that
+  value, or pass the PDF’s α_s to the matrix element.
+- This gives a **cross section**, not a single hadronic event sampler. If the
+  goal is detector-level events or a flow that samples (x₁, x₂, channel,
+  partonic angles) jointly, you need Option 2.
+
+**Effort:** roughly 1–2 days of code plus retraining the missing channels (each
+2-D balanced channel is ~20 min on this node), plus the LHAPDF installation.
+
+### 19.1 Energy-range option 1A — one model on [114, 2000] GeV
+
+Sample √ŝ log-uniformly (or uniformly in log √ŝ) and use a log-√ŝ condition
+feature. The current z, z², log(1+z) features with
+z = (√ŝ − 200)/(2000 − 200) compress 114–200 GeV into z < 0, so the feature
+and the condition sampler both need changing. One model is operationally
+simpler, but the low-√ŝ region — where the flow sees a small, cut-shaped phase
+space — gets only a small fraction of the training conditions unless the
+sampling is deliberately reweighted.
+
+### 19.2 Energy-range option 1B — split range (recommended)
+
+Train a dedicated low-range model on roughly **114–250 GeV**, which covers
+~74% of the hadronic cross section, and keep the existing `[200, 2000]` model
+for the high range. The overlap 200–250 GeV is a useful consistency check. The
+low-range model is cheap (~20 min per channel), its condition interval is
+narrow enough for the current features, and the already-validated high-range
+model is reused unchanged. Add the `[2000, 13000]` tail as a negligible
+constant (0.0015%) or a single MadEvent number.
+
+**Production-amplitude caveat:** both the low-range and high-range models must
+be trained **without** the `@1` diagram filter for the physical `p p > z j`.
+The existing `gu_zu` model is `@1`; it validates the machinery but is not the
+production amplitude. The high-range model in this option is the existing
+`@1` model only as a machinery baseline; a production run needs a full-LO
+retrain of the high range as well.
+
+## 20. Proposed change 2 (Option 2): direct hadronic flow
+
+Make the flow sample the full hadronic phase space:
+
+\[
+u=(c,\hat s,Y,u_1,u_2),\qquad
+f_c=\frac{|M_c|^2}{2\hat s}\,J(\hat s,u)\,\frac{f_{a_c}(x_1)f_{b_c}(x_2)}{s}\,\Theta(\text{lab cuts}).
+\]
+
+The final-state partons are generated in the partonic CM and boosted by \(Y\);
+the jet \(p_T,\eta\) cuts are applied in the lab. The channel \(c\) is a
+categorical variable; the estimator is
+
+\[
+\sigma=\mathbb E_{c\sim p_c,\,u\sim q_c}\left[\frac{f_c(u)}{p_c\,q_c(u)}\right],
+\]
+
+so only the sampled channel’s matrix element is needed per point. The flow
+needs a categorical marginal head and a PDF-aware target. The continuous flow
+can still use the existing marginal–copula factorization, but the target now
+includes the PDF peaks at small x, so the ESS will be lower and the training
+harder. This is the “real” `pp > z j` sampler, but it is a new phase-space
+class, a new target, a new training mode, and a new validation ladder (Sobol
+over the 4-D hadronic cube with PDFs, plus MadEvent `lpp=1`). Realistically
+1–2 weeks.
+
+### 20.1 Energy-range option 2A — single flow over the full hadronic phase space
+
+One joint flow over `(c, √ŝ, Y, u1, u2)` covering √ŝ from the ~113.4 GeV
+threshold to 13 TeV (equivalently x1, x2 from the PDF support to 1), with the
+PDFs and channel sum in the target. The beam energy √s = 13 TeV is a constant
+condition (or omitted). Pros: a single sampler for the whole hadronic phase
+space. Cons: the flow must resolve the luminosity peak at low √ŝ (74% of the
+cross section below 200 GeV) and the very small high-√ŝ tail in one model; the
+PDF peaks at small x and the large dynamic range make the training harder and
+the ESS lower.
+
+### 20.2 Energy-range option 2B — split range (recommended if 2A struggles)
+
+Train two joint flows: a low-√ŝ flow on **114–250 GeV** (the same boundary as
+Option 1B; ~74% of the cross section) and a high-√ŝ flow on **250–2000 GeV**,
+plus the negligible `[2000, 13000]` tail as a constant or a coarse third
+model. Each flow keeps the channel categorical and the PDF-aware target, but
+sees a narrower √ŝ range and a more uniform luminosity. The 200–250 GeV
+overlap is a consistency check. This mirrors Option 1B: the low range gets a
+dedicated model, the high range is cheaper, and the tail is negligible.
+
+## 21. MadEvent `p p > z j` slice diagnostic
+
+### 21.1 Result
+
+MadEvent `p p > z j` at 13 TeV, pT,j > 20 GeV, |eta_j| < 2.5, default
+`nn23lo1` PDF and dynamic scale:
+
+| √ŝ slice (GeV) | cross section (pb) | fraction of total |
+|---|---:|---:|
+| 0–120 | 645.0 ± 0.8 | 7.16% |
+| 120–200 | 6020 ± 5.6 | 66.81% |
+| 200–2000 | 2336 ± 4.4 | 25.92% |
+| 2000–13000 | 0.1389 ± 0.0003 | 0.0015% |
+| **total** | **9010 ± 10** | 100% |
+
+The slices sum to 9001 pb, 99.9% of the total; the 0.1% difference is the
+integration error. The 0–120 GeV entry is the threshold window: with
+m_Z = 91.188 GeV and pT,j > 20 GeV, the partonic threshold is
+√ŝ_min ≈ 113.4 GeV, so the 645 pb is the 113.4–120 GeV region.
+
+What this means:
+
+1. The current NF range covers only ~26% of the hadronic cross section. 74%
+   lies below 200 GeV, overwhelmingly in 120–200 GeV. This is the PDF
+   luminosity at small x beating the falling partonic cross section.
+2. The high tail is irrelevant. Above 2 TeV the contribution is 0.0015%, so
+   there is no reason to train a flow out to 13 TeV. A constant or a MadEvent
+   estimate is enough for the tail.
+3. The condition minimum must be lowered to ~114 GeV. Training on
+   `[200, 2000]` and extrapolating below 200 would miss most of the physics.
+   The NF can handle √ŝ near threshold, but the allowed phase space shrinks as
+   the pT cut approaches the kinematic limit, so the ESS there needs checking.
+4. This is exactly why the beam energy is not the right NF condition. At
+   13 TeV the beam energy is a constant; the physically important variable is
+   √ŝ, whose distribution is extremely non-uniform. The beam energy enters
+   through the luminosity and the x1,2 ≤ 1 limits, not through the flow’s
+   condition. MadGraph handles the two modes separately — partonic
+   (`lpp=0`, `ebeam=√ŝ/2`) for the building-block checks and hadronic
+   (`lpp=1`, `ebeam=6500`) for the physical cross section — and they must not
+   be mixed.
+
+**Revised range strategy.** Two workable choices:
+
+**A. One model on [114, 2000] GeV.** (Same as Option 1A.) One model is
+operationally simpler, but the low-√ŝ region gets only a small fraction of the
+training conditions unless the sampling is reweighted.
+
+**B. Split the range (recommended).** A dedicated low-range model on roughly
+114–250 GeV, which covers ~74% of the hadronic cross section, plus the
+existing [200, 2000] model for the high range; the 200–250 GeV overlap is a
+consistency check; the [2000, 13000] tail is a negligible constant (0.0015%).
+The low-range model is cheap (~20 min per channel), its condition interval is
+narrow enough for the current features, and the already-validated high-range
+model is reused unchanged (subject to the full-LO/`@1` caveat above).
+
+**Decision pending:** A versus B. B is recommended.
+
+### 21.2 Code-wise procedure
+
+The measurement is a plain MadEvent integration; no NF code is involved.
+
+**1. Generate the MadEvent directory.**
+
+```bash
+source /storage/users/dlai/mango-linux/env_linux.sh
+mkdir -p /storage/users/dlai/mango-linux/scratch_ppzj
+cat > /storage/users/dlai/mango-linux/scratch_ppzj/gen_ppzj_madevent.mg5 <<'EOF'
+set automatic_html_opening False
+import model sm
+generate p p > z j
+output /storage/users/dlai/mango-linux/scratch_ppzj/ppzj_madevent
+EOF
+/storage/users/dlai/mango-linux/bin/mg5_aMC \
+  /storage/users/dlai/mango-linux/scratch_ppzj/gen_ppzj_madevent.mg5
+```
+
+`output` (not `output standalone`) creates `bin/madevent`, the MadEvent
+executable, and `Cards/run_card.dat`.
+
+**2. Set the run card.** The default card already has the hadronic mode:
+
+```
+lpp1 = lpp2 = 1
+ebeam1 = ebeam2 = 6500
+pdlabel1 = pdlabel2 = nn23lo1
+ptj = 20
+dsqrt_shat = 0
+dsqrt_shatmax = -1
+fixed_ren_scale = False
+fixed_fac_scale1 = fixed_fac_scale2 = False
+```
+
+The diagnostic changes only:
+
+| field | value | meaning |
+|---|---|---|
+| `etaj` | 2.5 | jet rapidity cut |
+| `dsqrt_shat` | slice min (GeV) | minimum partonic √ŝ |
+| `dsqrt_shatmax` | slice max (GeV; -1 = none) | maximum partonic √ŝ |
+| `iseed` | 260919 | fixed seed |
+| `use_syst` | False | no systematics |
+| `nevents` | 10000 | not used by survey/refine |
+
+The run card uses the value-before-name format, e.g. `5.0 = etaj`,
+`0.0 = dsqrt_shat`, `-1 = dsqrt_shatmax`. The Python helper
+`update_run_card` in `experiments/validate_madgraph_process_with_madevent.py`
+replaces the value with a regex that preserves the label and the comment:
+
+```python
+pattern = re.compile(
+    rf"(?im)^(?P<indent>\s*)(?P<old>[^#!\n=]+?)(?P<sep>\s*=\s*{re.escape(key)}\b)"
+)
+text, count = pattern.subn(
+    lambda m: f"{m.group('indent')}{value}{m.group('sep')}", text, count=1
+)
+```
+
+**3. Run the slices.** For each slice, write a command file and run
+`bin/madevent` from the process directory:
+
+```
+survey <name> --points=20000 --iterations=8 --accuracy=0.002
+refine 0.001 3
+```
+
+`survey` builds the grid; `refine` reduces the integration error to 0.1%.
+The slices were:
+
+| name | `dsqrt_shat` | `dsqrt_shatmax` |
+|---|---:|---:|
+| total | 0.0 | -1.0 |
+| 0_120 | 0.0 | 120.0 |
+| 120_200 | 120.0 | 200.0 |
+| 200_2000 | 200.0 | 2000.0 |
+| 2000_13000 | 2000.0 | 13000.0 |
+
+**4. Read the result.** `SubProcesses/results.dat` first line is
+`cross error ...` in pb; the helper `current_results_dat` parses the first two
+fields:
+
+```python
+first = (process_dir / "SubProcesses" / "results.dat").read_text().splitlines()[0]
+fields = first.replace("D", "E").split()
+cross_pb, error_pb = float(fields[0]), float(fields[1])
+```
+
+The total is measured independently; the slices sum to 99.9% of it, which is
+the closure check.
+
+**5. Driver.** The inline loop was:
+
+```python
+cases = [
+    ('total', 0.0, -1.0),
+    ('0_120', 0.0, 120.0),
+    ('120_200', 120.0, 200.0),
+    ('200_2000', 200.0, 2000.0),
+    ('2000_13000', 2000.0, 13000.0),
+]
+for name, smin, smax in cases:
+    update_run_card(proc, {
+        'lpp1': 1, 'lpp2': 1, 'ebeam1': '6500.0', 'ebeam2': '6500.0',
+        'ptj': 20.0, 'etaj': 2.5,
+        'dsqrt_shat': smin, 'dsqrt_shatmax': smax,
+        'nevents': 10000, 'iseed': 260919, 'use_syst': 'False',
+    })
+    (proc / f'{name}_commands.txt').write_text(
+        f"survey {name} --points=20000 --iterations=8 --accuracy=0.002\n"
+        f"refine 0.001 3\n"
+    )
+    subprocess.run(
+        [str(proc / 'bin' / 'madevent'), str(proc / f'{name}_commands.txt')],
+        cwd=proc, capture_output=True, text=True,
+    )
+    print(name, current_results_dat(proc))
+```
+
+The generated directory is in the scratch tree
+(`/storage/users/dlai/mango-linux/scratch_ppzj/ppzj_madevent`), not in the
+repo. The helper functions are in
+`experiments/validate_madgraph_process_with_madevent.py`.
+
+**Caveats.** The numbers use the default `nn23lo1` PDF and dynamic scales; the
+fractions should be recomputed with the final PDF/scale choice. The
+`p p > z j` here is the full LO amplitude (no `@1`). The total 9010 pb is not
+the same as the native MG5 baseline 14350 pb because that baseline used
+different PDF/scale/cuts (e.g. `etaj = 5`); the slice fractions are the robust
+output.
+
+## 22. Current one-jet validation status
+
+Balanced `gu_zu` (`g u > z u @1`, 2-D, pT,j > 20, |eta_j| < 2.5), 100k NF and
+2^18 × 8 Sobol evaluations per energy, compared to partonic MadEvent
+(`lpp=0`, `ebeam=√ŝ/2`):
+
+| √ŝ (GeV) | NF (pb) | Sobol (pb) | MadEvent (pb) | NF−Sobol pull | MadEvent−NF pull |
+|---:|---:|---:|---:|---:|---:|
+| 250 | 10.4089 ± 0.0064 | 10.4079 ± 0.00014 | 10.4010 ± 0.0066 | +0.14σ | −0.85σ |
+| 400 | 4.8288 ± 0.0026 | 4.8296 ± 0.00009 | 4.8307 ± 0.0018 | −0.31σ | +0.61σ |
+| 650 | 1.92776 ± 0.00093 | 1.92726 ± 0.00004 | 1.92640 ± 0.00087 | +0.54σ | −1.07σ |
+| 1000 | 0.829523 ± 0.00039 | 0.829555 ± 0.000014 | 0.829530 ± 0.00035 | −0.08σ | +0.01σ |
+| 1500 | 0.371219 ± 0.000135 | 0.371483 ± 0.000007 | 0.371550 ± 0.000123 | −1.95σ | +1.81σ |
+| 1950 | 0.220276 ± 0.000073 | 0.220348 ± 0.000003 | 0.220460 ± 0.000109 | −0.99σ | +1.41σ |
+
+Balanced training: ESS 0.313, Ihat = 4.71015×10⁻⁹ GeV⁻², std_logw = 1.1268,
+20m52s. The held-out NF ESS is 0.963–0.989. The Sobol and MadEvent references
+agree within ~1σ at every energy; the NF is consistent within statistics, with
+the 1500 GeV point the largest (1.95σ vs Sobol). A 500k-evaluation NF rerun
+would settle whether that is a fluctuation or a small high-√ŝ bias.

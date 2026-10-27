@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import multiprocessing as mp
 from pathlib import Path
 import sys
@@ -39,7 +40,12 @@ def _evaluate_chunk(payload):
 def main() -> None:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--alpha-s", type=float, default=0.118)
+    parser.add_argument(
+        "--channel",
+        default=None,
+        help="Channel name from the config's `channels` list (required for multi-subprocess configs).",
+    )
+    parser.add_argument("--alpha-s", type=float, default=None)
     parser.add_argument("--me-chunk", type=int, default=512)
     parser.add_argument(
         "--me-workers",
@@ -55,8 +61,19 @@ def main() -> None:
     )
     process_args, remaining = parser.parse_known_args()
 
-    spec = load_process_spec(process_args.config)
-    evaluator = ConfiguredMadGraphIntegrand(spec, PROJECT, process_args.alpha_s)
+    config_data = json.loads(Path(process_args.config).read_text(encoding="utf-8"))
+    if config_data.get("channels") and process_args.channel is None:
+        raise ValueError(
+            "This config defines multiple channels; pass --channel with one of: "
+            + ", ".join(item["name"] for item in config_data["channels"])
+        )
+    spec = load_process_spec(process_args.config, channel=process_args.channel)
+    alpha_s = (
+        process_args.alpha_s
+        if process_args.alpha_s is not None
+        else float(spec.get("alpha_s", 0.118))
+    )
+    evaluator = ConfiguredMadGraphIntegrand(spec, PROJECT, alpha_s)
 
     pool = None
     if process_args.me_workers > 0:
@@ -70,7 +87,7 @@ def main() -> None:
         pool = context.Pool(
             processes=process_args.me_workers,
             initializer=_init_me_worker,
-            initargs=(spec, str(PROJECT), process_args.alpha_s),
+            initargs=(spec, str(PROJECT), alpha_s),
         )
     condition = spec["condition"]
     minimum = float(condition["minimum"])
@@ -136,6 +153,8 @@ def main() -> None:
     sys.argv = [sys.argv[0], *filtered]
     print(f"Configured process       = {spec['name']}")
     print(f"MadGraph process         = {spec['process']}")
+    print(f"MadGraph subprocess      = {spec.get('subprocess', '(single)')}")
+    print(f"alpha_s                  = {alpha_s}")
     print(f"dimension                = {evaluator.dimension}")
     print(f"sqrt(s_hat) range        = [{minimum:g}, {maximum:g}] GeV")
     print(f"matrix-element workers   = {process_args.me_workers}")

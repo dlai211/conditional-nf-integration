@@ -784,129 +784,174 @@ python scripts/compare_validation.py \
 
 ---
 
-## 8. Z + jets smoke campaign — Linux/ROCm (2026-10-26)
+## 8. Hadronic pp → Z + j campaign — Linux/ROCm (2026-10-26/27)
 
-Six partonic Z + jets configurations were built and smoke-trained on the `odyssey` node (4x AMD Instinct MI300A, torch 2.5.1+rocm6.2, MadGraph 3.6.7). Training used `--speed-profile smoke --device cuda --me-workers 16`; each held-out validation used `--nf-evals 100000 --no-sobol --compare-uniform`, so the reference is an equal-budget uniform Monte Carlo, not randomized Sobol.
+This section replaces the earlier partonic Z + jets smoke campaign. It records
+the first hadronic `p p > z j` implementation (Option 1 luminosity layer plus
+Option B range split), the 12 balanced conditional NFs, the native MadEvent
+baseline, the exact partonic interpolation, the cut-removal test, and the
+performance benchmark.
 
-The two 2-D configs were first run **without** jet cuts. They were then rerun with `pt_j > 20` and `abs(eta_j) < 2.5`; both sets of results are kept below, with the original rows labelled **no cuts** and the rerun rows labelled **pt/eta cuts**.
+### 8.1 Setup
 
-### 8.1 Processes
+- Machine: `odyssey`, 4x AMD MI300A (ROCm), 192 logical CPUs, MG5 3.6.7.
+- Process: full-LO `p p > z j` (no `@1`). MG5's `@1` annotation is a no-op
+  here: the old `g u > z u @1`, the explicit `g u > z u` (no `@1`), and the
+  `P1_gu_zu` directory of `p p > z j` were evaluated at identical momenta and
+  are bit-identical. The new configs use no `@1`.
+- Six subprocess groups: `g u`, `g d`, `g u~`, `g d~`, `u u~`, `d d~`.
+- Two condition ranges: low `[114, 250]` GeV and high `[200, 2000]` GeV; six
+  channels per range, 12 balanced models. Held-out low points 120, 150, 180,
+  210, 240 GeV; high points 250, 400, 650, 1000, 1500, 1950 GeV.
+- Fiducial cuts: `p_T,j > 20` GeV, `|eta_j| < 2.5`.
+- PDF: LHAPDF `NNPDF23_lo_as_0130_qed`, ID **247000**, member 0. This is the
+  set behind MG5's `nn23lo1`. The run card's requested ID 230000 is
+  `NNPDF23_nlo_as_0119` and does not match the baseline.
+- `alpha_s = 0.130`; fixed renormalization and factorization scale 91.188 GeV.
+- Configs: `configs/processes/zj_hadronic_low.json`,
+  `configs/processes/zj_hadronic_high.json`.
+- Native reference: default dynamic-scale `p p > z j` total **9010 ± 10 pb**;
+  fixed-scale 91.188 GeV total **9147.5 ± 10.32 pb** (39.4 s, 1,360,036
+  integration points). The NF/PDF side uses the fixed scale, so 9147.5 pb is
+  the comparison number.
 
-| config | process | dim | final PDGs | jet cuts (current config) |
-|---|---|---:|---|---|
-| `gu_zu.json` | `g u > z u @1` | 2 | [23, 2] | pt 20, abs(eta) 2.5 (added after the uncut run) |
-| `qqbar_zg.json` | `u u~ > z g @1` | 2 | [23, 21] | pt 20, abs(eta) 2.5 (added after the uncut run) |
-| `gg_zuubar.json` | `g g > z u u~ @1` | 5 | [23, 2, -2] | pt 20, abs(eta) 2.5, dR 0.4, m_jj 20 |
-| `gu_zug.json` | `g u > z u g @1` | 5 | [23, 2, 21] | pt 20, abs(eta) 2.5, dR 0.4, m_jj 20 |
-| `qqbar_zgg.json` | `u u~ > z g g @1` | 5 | [23, 21, 21] | pt 20, abs(eta) 2.5, dR 0.4, m_jj 20 |
-| `uu_zuu.json` | `u u > z u u @1` | 5 | [23, 2, 2] | pt 20, abs(eta) 2.5, dR 0.4, m_jj 20 |
+### 8.2 Balanced training
 
-The four 5-D processes use the standard jet cuts and condition `sqrt(s_hat) in [200, 2000] GeV`; the two 2-D processes use the same condition. Held-out energies are 250, 400, 650, 1000, 1500 and 1950 GeV.
+| range | channel | ESS | Ihat (GeV^-2) | log w std | wall |
+|---|---|---:|---:|---:|---:|
+| low | `gu_zu` | 0.9592 | 3.6869e-08 | 0.1563 | 21m54s |
+| low | `gd_zd` | 0.9614 | 4.7293e-08 | 0.1541 | 22m04s |
+| low | `gux_zux` | 0.9613 | 3.6876e-08 | 0.1560 | 22m19s |
+| low | `gdx_zdx` | 0.9628 | 4.7295e-08 | 0.1557 | 23m26s |
+| low | `uux_zg` | 0.7755 | 3.7543e-07 | 0.4628 | 19m36s |
+| low | `ddx_zg` | 0.7829 | 4.8128e-07 | 0.4609 | 21m10s |
+| high | `gu_zu` | 0.3125 | 5.1887e-09 | 1.1277 | 21m21s |
+| high | `gd_zd` | 0.3126 | 6.6621e-09 | 1.1279 | 23m47s |
+| high | `gux_zux` | 0.3126 | 5.1909e-09 | 1.1287 | 18m54s |
+| high | `gdx_zdx` | 0.3114 | 6.6607e-09 | 1.1282 | 20m38s |
+| high | `uux_zg` | 0.2306 | 2.5556e-08 | 1.2194 | 21m07s |
+| high | `ddx_zg` | 0.2309 | 3.2770e-08 | 1.2184 | 21m26s |
 
-### 8.2 Standalone build and integrand validation
+The low `g q` channels reach ESS ≈ 0.96; the low `q q~` channels ≈ 0.78; the
+high models ≈ 0.31. `std_logw` is finite for every model. The training
+campaign wall time was 1.19 h with four concurrent 48-CPU jobs; the summed job
+time is 4.30 h.
 
-`validate_madgraph_process_integrand.py --points 500`:
+### 8.3 Luminosity integration
 
-| process | dim | max 4-momentum residual | max mass-shell residual | min Jacobian | finite fraction | cut-rejected fraction | points/s |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| `gu_zu (no cuts)` | 2 | 2.274e-13 | 3.602e-10 | 0.0316673 | 1 | 0 | 77,457 |
-| `qqbar_zg (no cuts)` | 2 | 2.274e-13 | 3.602e-10 | 0.0316673 | 1 | 0 | 94,500 |
-| `gu_zu (pt/eta cuts)` | 2 | 2.274e-13 | 3.602e-10 | 0.0316673 | 1 | 0.026 | 111,759 |
-| `qqbar_zg (pt/eta cuts)` | 2 | 2.274e-13 | 3.602e-10 | 0.0316673 | 1 | 0.026 | 94,912 |
-| `gg_zuubar` | 5 | 6.821e-13 | 3.602e-10 | 0.187294 | 1 | 0.07 | 19,236 |
-| `gu_zug` | 5 | 6.821e-13 | 3.602e-10 | 0.187294 | 1 | 0.07 | 19,451 |
-| `qqbar_zgg` | 5 | 6.821e-13 | 3.602e-10 | 0.187294 | 1 | 0.07 | 19,497 |
-| `uu_zuu` | 5 | 6.821e-13 | 3.602e-10 | 0.187294 | 1 | 0.07 | 26,673 |
+The integration evaluates each conditional NF on a 60-point log-spaced grid
+per range, multiplies by the LHAPDF luminosity `dL/dsqrt(s-hat)`, integrates
+over `sqrt(s-hat)`, and sums the six channels. A constant 0.1389 ± 0.00026 pb
+is added for the `[2000, 13000]` GeV tail.
 
-All entries have finite momenta, positive Jacobians and a fully finite integrand. The 5-D configs reject 7% of random points; the cut 2-D configs reject 2.6%; the uncut 2-D configs reject none.
+| channel | integral (pb) | error (pb) | mean ESS |
+|---|---:|---:|---:|
+| `gu_zu` | 3461.60 | 0.2832 | 0.9654 |
+| `gd_zd` | 2986.69 | 0.2435 | 0.9671 |
+| `gux_zux` | 1151.68 | 0.0933 | 0.9718 |
+| `gdx_zdx` | 1654.73 | 0.1279 | 0.9690 |
+| `uux_zg` | 2288.63 | 0.3044 | 0.9647 |
+| `ddx_zg` | 2222.05 | 0.3074 | 0.9649 |
+| **total + tail** | **13765.5** | **0.5931** | — |
 
-### 8.3 Smoke training
+The NF total is **1.50×** the native 9147.5 ± 10.32 pb. This is **not a valid
+physics result**. The low-range `gu_zu` partonic cross section is ~20× low at
+114–120 GeV, while the luminosity is 5–13× high in the low range: the code
+gives `L(114)=4.05` and `L(120)≈3.5 GeV^-1`, versus native-implied values near
+0.82 and 0.29. The channel sum compensates in the partonic interpolation plot
+but not in the luminosity-weighted total.
 
-| process | dim | edges | ESS | Ihat (GeV^-2) | log w std | wall |
-|---|---:|---:|---:|---:|---:|---:|
-| `gu_zu (no cuts)` | 2 | 1 | 0.009237 | 1.65304990e-08 | 1.241441 | 1m35.515s |
-| `qqbar_zg (no cuts)` | 2 | 1 | 0.014961 | 9.17253501e-08 | 1.374604 | 1m44.740s |
-| `gu_zu (pt/eta cuts)` | 2 | 1 | 0.282408 | 4.59761106e-09 | 1.121103 | 1m48.185s |
-| `qqbar_zg (pt/eta cuts)` | 2 | 1 | 0.196449 | 2.27723040e-08 | 1.229682 | 1m54.957s |
-| `gg_zuubar` | 5 | 10 | 0.465148 | 4.35782187e-10 | 0.814323 | 4m34.322s |
-| `gu_zug` | 5 | 10 | 0.443344 | 1.73955431e-08 | 0.750414 | 4m45.083s |
-| `qqbar_zgg` | 5 | 10 | 0.196134 | 1.67528378e-08 | 1.159202 | 4m57.086s |
-| `uu_zuu` | 5 | 10 | 0.450087 | 9.85523372e-09 | 0.712936 | 5m22.811s |
+### 8.4 Exact partonic interpolation
 
-Smoke is 300 KL steps: these numbers check the pipeline, not production accuracy. `std_logw` is computed over finite weights and is finite for every process.
+Explicit partonic MadEvent at the same 50+50 points, with the same fixed scale,
+PDF, `alpha_s`, and cuts. High range at 1228.57 GeV:
 
-### 8.4 Held-out validation (no Sobol, equal-budget uniform)
+| channel | NF (pb) | MadEvent (pb) | ratio |
+|---|---:|---:|---:|
+| `gu_zu` | 0.6086 ± 0.0004 | 0.60815 ± 0.00024 | 1.0007 |
+| `gd_zd` | 0.7796 ± 0.0004 | 0.77988 ± 0.00031 | 0.9996 |
+| `gux_zux` | 0.6083 ± 0.0004 | 0.60815 ± 0.00024 | 1.0002 |
+| `gdx_zdx` | 0.7803 ± 0.0009 | 0.77988 ± 0.00031 | 1.0005 |
 
-NF and uniform Monte Carlo each use 100,000 evaluations per energy. `pull = (NF - uniform) / sqrt(sigma_NF^2 + sigma_uniform^2)`.
+The high-range models agree with the exact matrix element. Low range
+`gu_zu`:
 
-| process | E (GeV) | NF (pb) | NF stderr | NF rel. | NF ESS | uniform (pb) | uniform stderr | uniform ESS | pull | ESS ratio | variance reduction |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `gu_zu (no cuts)` | 250 | 39.4995 | 7.85 | 19.878% | 0.000253 | 23.4245 | 1.75 | 0.00179 | +2.00 | 0.14x | 0.05x |
-| `gu_zu (no cuts)` | 400 | 14.4514 | 0.843 | 5.834% | 0.002929 | 25.4693 | 11.6 | 4.795e-05 | -0.94 | 61.09x | 190.30x |
-| `gu_zu (no cuts)` | 650 | 12.9994 | 5.29 | 40.709% | 6.034e-05 | 11.99 | 4.67 | 6.586e-05 | +0.14 | 0.92x | 0.78x |
-| `gu_zu (no cuts)` | 1000 | 2.40419 | 0.108 | 4.480% | 0.004958 | 1.8521 | 0.254 | 0.0005332 | +2.00 | 9.30x | 5.54x |
-| `gu_zu (no cuts)` | 1500 | 1.34645 | 0.159 | 11.792% | 0.0007186 | 1.82362 | 0.668 | 7.445e-05 | -0.69 | 9.65x | 17.72x |
-| `gu_zu (no cuts)` | 1950 | 1.1199 | 0.357 | 31.908% | 9.821e-05 | 0.528523 | 0.0583 | 0.0008199 | +1.63 | 0.12x | 0.03x |
-| `qqbar_zg (no cuts)` | 250 | 267.595 | 38.6 | 14.412% | 0.0004812 | 191.882 | 29.2 | 0.0004326 | +1.57 | 1.11x | 0.57x |
-| `qqbar_zg (no cuts)` | 400 | 89.6803 | 9.72 | 10.841% | 0.0008502 | 217.472 | 92.7 | 5.507e-05 | -1.37 | 15.44x | 90.85x |
-| `qqbar_zg (no cuts)` | 650 | 55.3051 | 17.3 | 31.243% | 0.0001024 | 43.8478 | 13.3 | 0.0001086 | +0.53 | 0.94x | 0.59x |
-| `qqbar_zg (no cuts)` | 1000 | 11.7523 | 0.461 | 3.920% | 0.006465 | 9.37643 | 0.864 | 0.001177 | +2.43 | 5.49x | 3.51x |
-| `qqbar_zg (no cuts)` | 1500 | 6.64173 | 0.476 | 7.164% | 0.001945 | 7.35178 | 1.91 | 0.0001486 | -0.36 | 13.08x | 16.06x |
-| `qqbar_zg (no cuts)` | 1950 | 4.6088 | 0.917 | 19.904% | 0.0002523 | 2.84589 | 0.347 | 0.0006711 | +1.80 | 0.38x | 0.14x |
-| `gu_zu (pt/eta cuts)` | 250 | 10.3993 | 0.014 | 0.135% | 0.8461 | 10.484 | 0.0571 | 0.2522 | -1.44 | 3.35x | 16.57x |
-| `gu_zu (pt/eta cuts)` | 400 | 4.82777 | 0.00845 | 0.175% | 0.7656 | 4.89945 | 0.0307 | 0.2028 | -2.25 | 3.78x | 13.23x |
-| `gu_zu (pt/eta cuts)` | 650 | 1.92784 | 0.00316 | 0.164% | 0.7879 | 1.93677 | 0.0122 | 0.2018 | -0.71 | 3.90x | 14.83x |
-| `gu_zu (pt/eta cuts)` | 1000 | 0.827631 | 0.00112 | 0.135% | 0.8462 | 0.8365 | 0.00528 | 0.2005 | -1.64 | 4.22x | 22.42x |
-| `gu_zu (pt/eta cuts)` | 1500 | 0.371298 | 0.000363 | 0.098% | 0.9128 | 0.373584 | 0.00235 | 0.2011 | -0.96 | 4.54x | 42.09x |
-| `gu_zu (pt/eta cuts)` | 1950 | 0.220198 | 0.00022 | 0.100% | 0.9089 | 0.220777 | 0.00139 | 0.2017 | -0.41 | 4.51x | 39.72x |
-| `qqbar_zg (pt/eta cuts)` | 250 | 61.541 | 0.0951 | 0.155% | 0.8072 | 61.791 | 0.307 | 0.2882 | -0.78 | 2.80x | 10.43x |
-| `qqbar_zg (pt/eta cuts)` | 400 | 22.1756 | 0.0411 | 0.186% | 0.7439 | 22.4817 | 0.127 | 0.2376 | -2.29 | 3.13x | 9.58x |
-| `qqbar_zg (pt/eta cuts)` | 650 | 7.98525 | 0.0147 | 0.185% | 0.7457 | 8.06598 | 0.0462 | 0.2336 | -1.66 | 3.19x | 9.82x |
-| `qqbar_zg (pt/eta cuts)` | 1000 | 3.31509 | 0.00584 | 0.176% | 0.763 | 3.3427 | 0.0193 | 0.2305 | -1.37 | 3.31x | 10.93x |
-| `qqbar_zg (pt/eta cuts)` | 1500 | 1.46383 | 0.00224 | 0.153% | 0.8099 | 1.47672 | 0.00855 | 0.2297 | -1.46 | 3.53x | 14.54x |
-| `qqbar_zg (pt/eta cuts)` | 1950 | 0.865088 | 0.00117 | 0.135% | 0.8459 | 0.867489 | 0.00503 | 0.2292 | -0.46 | 3.69x | 18.57x |
-| `gg_zuubar` | 250 | 0.291168 | 0.000868 | 0.298% | 0.5296 | 0.292412 | 0.00151 | 0.2728 | -0.71 | 1.94x | 3.03x |
-| `gg_zuubar` | 400 | 0.364317 | 0.000923 | 0.253% | 0.6091 | 0.362505 | 0.00266 | 0.1568 | +0.64 | 3.88x | 8.29x |
-| `gg_zuubar` | 650 | 0.250133 | 0.000625 | 0.250% | 0.616 | 0.252794 | 0.00213 | 0.1232 | -1.20 | 5.00x | 11.66x |
-| `gg_zuubar` | 1000 | 0.155313 | 0.000391 | 0.252% | 0.6116 | 0.154122 | 0.00137 | 0.1118 | +0.83 | 5.47x | 12.32x |
-| `gg_zuubar` | 1500 | 0.0932756 | 0.000237 | 0.254% | 0.6077 | 0.0939742 | 0.000941 | 0.09061 | -0.72 | 6.71x | 15.78x |
-| `gg_zuubar` | 1950 | 0.0658615 | 0.00018 | 0.273% | 0.5723 | 0.0657108 | 0.000725 | 0.07593 | +0.20 | 7.54x | 16.21x |
-| `gu_zug` | 250 | 7.66896 | 0.0257 | 0.335% | 0.4709 | 7.73845 | 0.0769 | 0.09192 | -0.86 | 5.12x | 8.95x |
-| `gu_zug` | 400 | 11.044 | 0.0358 | 0.324% | 0.4877 | 10.8517 | 0.219 | 0.02404 | +0.87 | 20.29x | 37.31x |
-| `gu_zug` | 650 | 9.40122 | 0.0311 | 0.330% | 0.4782 | 9.45959 | 0.271 | 0.01208 | -0.21 | 39.59x | 75.90x |
-| `gu_zug` | 1000 | 6.92904 | 0.0213 | 0.307% | 0.514 | 7.05995 | 0.263 | 0.007155 | -0.50 | 71.84x | 152.35x |
-| `gu_zug` | 1500 | 4.87194 | 0.0146 | 0.299% | 0.5274 | 5.37683 | 0.337 | 0.002543 | -1.50 | 207.41x | 533.20x |
-| `gu_zug` | 1950 | 3.7903 | 0.0117 | 0.307% | 0.5142 | 3.57958 | 0.235 | 0.002306 | +0.89 | 222.93x | 408.31x |
-| `qqbar_zgg` | 250 | 19.8641 | 0.0682 | 0.343% | 0.4591 | 19.8365 | 0.144 | 0.1587 | +0.17 | 2.89x | 4.49x |
-| `qqbar_zgg` | 400 | 15.5398 | 0.0595 | 0.383% | 0.4054 | 15.4473 | 0.182 | 0.06729 | +0.48 | 6.02x | 9.34x |
-| `qqbar_zgg` | 650 | 8.77946 | 0.0461 | 0.525% | 0.266 | 8.83038 | 0.162 | 0.02881 | -0.30 | 9.23x | 12.36x |
-| `qqbar_zgg` | 1000 | 4.83502 | 0.0289 | 0.598% | 0.2183 | 4.68244 | 0.13 | 0.01287 | +1.15 | 16.96x | 20.09x |
-| `qqbar_zgg` | 1500 | 2.65833 | 0.0205 | 0.770% | 0.1442 | 2.76236 | 0.106 | 0.006727 | -0.96 | 21.44x | 26.87x |
-| `qqbar_zgg` | 1950 | 1.7568 | 0.0133 | 0.758% | 0.1482 | 1.68191 | 0.0445 | 0.01411 | +1.61 | 10.50x | 11.14x |
-| `uu_zuu` | 250 | 2.53056 | 0.00847 | 0.335% | 0.4719 | 2.55708 | 0.0275 | 0.07977 | -0.92 | 5.92x | 10.53x |
-| `uu_zuu` | 400 | 5.20849 | 0.0196 | 0.377% | 0.4133 | 5.08724 | 0.0882 | 0.03222 | +1.34 | 12.83x | 20.18x |
-| `uu_zuu` | 650 | 5.27033 | 0.0191 | 0.362% | 0.4322 | 5.38484 | 0.139 | 0.01472 | -0.81 | 29.37x | 53.21x |
-| `uu_zuu` | 1000 | 4.30789 | 0.0144 | 0.333% | 0.4737 | 4.31231 | 0.127 | 0.01144 | -0.03 | 41.43x | 77.98x |
-| `uu_zuu` | 1500 | 3.2656 | 0.0106 | 0.325% | 0.4871 | 3.3943 | 0.126 | 0.007179 | -1.02 | 67.85x | 141.89x |
-| `uu_zuu` | 1950 | 2.63476 | 0.00895 | 0.340% | 0.4642 | 2.58726 | 0.111 | 0.005377 | +0.43 | 86.33x | 154.52x |
+| sqrt(s-hat) (GeV) | NF (pb) | MadEvent (pb) | ratio |
+|---:|---:|---:|---:|
+| 114 | 4.78 ± 0.02 | 118.76 ± 0.08 | 0.040 |
+| 116.776 | 10.04 ± 0.02 | 229.82 ± 0.13 | 0.044 |
+| 119.551 | 12.46 ± 0.02 | 263.42 ± 0.18 | 0.047 |
+| 250 | ≈10.4 | ≈10.4 | ≈1 |
 
-| process | pull range | NF ESS range | uniform ESS range | ESS ratio range | variance reduction range |
-|---|---:|---:|---:|---:|---:|
-| `gu_zu (no cuts)` | -0.94 … +2.00 | 6.034e-05 … 0.004958 | 4.795e-05 … 0.00179 | 0.12 … 61.09x | 0.03 … 190.30x |
-| `qqbar_zg (no cuts)` | -1.37 … +2.43 | 0.0001024 … 0.006465 | 5.507e-05 … 0.001177 | 0.38 … 15.44x | 0.14 … 90.85x |
-| `gu_zu (pt/eta cuts)` | -2.25 … -0.41 | 0.7656 … 0.9128 | 0.2005 … 0.2522 | 3.35 … 4.54x | 13.23 … 42.09x |
-| `qqbar_zg (pt/eta cuts)` | -2.29 … -0.46 | 0.7439 … 0.8459 | 0.2292 … 0.2882 | 2.80 … 3.69x | 9.58 … 18.57x |
-| `gg_zuubar` | -1.20 … +0.83 | 0.5296 … 0.616 | 0.07593 … 0.2728 | 1.94 … 7.54x | 3.03 … 16.21x |
-| `gu_zug` | -1.50 … +0.89 | 0.4709 … 0.5274 | 0.002306 … 0.09192 | 5.12 … 222.93x | 8.95 … 533.20x |
-| `qqbar_zgg` | -0.96 … +1.61 | 0.1442 … 0.4591 | 0.006727 … 0.1587 | 2.89 … 21.44x | 4.49 … 26.87x |
-| `uu_zuu` | -1.02 … +1.34 | 0.4133 … 0.4871 | 0.005377 … 0.07977 | 5.92 … 86.33x | 10.53 … 154.52x |
+The six-channel **summed** partonic curve in `interpolation_low.png` overlaps
+the exact MadEvent points; the per-channel `gu_zu` is ~20–25× low below
+120 GeV and the other channels compensate. The cuts are applied to both the NF
+and MadEvent sides of this comparison.
 
-### 8.5 Notes
+### 8.5 Cut-removal test
 
-- These are **smoke** models (300 KL steps), not production results. The held-out estimates are accurate enough to verify the pipeline, but the ESS and error bars are below what the balanced/thorough profiles deliver.
-- `gg_zuubar` is the same partonic process as the existing `gg_zjj` configuration (`g g > z u u~ @1`), with the same 5-D phase space and cuts; it is a duplicate channel under a new name. Its smoke metrics should therefore be statistically similar to the `gg_zjj` smoke.
-- `@1` is MadGraph's diagram filter. It keeps each standalone to one subprocess, which `MadGraphMatrixElement` requires, but it also selects a subset of the tree-level diagrams for these channels. These configs are for pipeline smoke tests; a production physics comparison should confirm whether the full LO amplitude is needed.
-- The reference is uniform Monte Carlo at the same 100k budget, not Sobol. Scrambled Sobol remains the build-level cross-check for future validation runs.
-- **gu_zu: cuts vs no cuts.** Mean held-out NF ESS 0.0015 -> 0.845; mean relative stderr 19.10% -> 0.13%; largest cut-run |pull| 2.25 sigma. The cut removes the forward/soft region that dominates the uncut integral: at 250 GeV the NF estimate moves from 39.5 pb (no cuts) to 10.4 pb (cuts). Both are valid but different observables. The uncut rows are retained as the baseline.
-- **qqbar_zg: cuts vs no cuts.** Mean held-out NF ESS 0.00168 -> 0.786; mean relative stderr 14.58% -> 0.16%; largest cut-run |pull| 2.29 sigma. The cut removes the forward/soft region that dominates the uncut integral: at 250 GeV the NF estimate moves from 267.6 pb (no cuts) to 61.54 pb (cuts). Both are valid but different observables. The uncut rows are retained as the baseline.
-- The 2-D cut runs agree with uniform MC at the ~1 sigma level at most energies; the largest deviation is -2.3 sigma at 400 GeV in both channels. With six energies that is not decisive, but it is the one point worth an independent higher-statistics/Sobol check before a production claim.
+The low config was rerun without the `p_T,j > 20` / `|eta_j| < 2.5` cuts. The
+uncut `g u > z u` integrand is collinearly divergent (the final quark can be
+collinear with the initial quark), so the uncut low-range model's final ESS
+collapses to **0.0029** versus **0.865** for the cut smoke; `Ihat` moves from
+3.69e-08 to 1.74e-07 GeV^-2. The cuts are the jet definition, not the source
+of the low-model bias. The cut config was restored.
+
+### 8.6 Performance benchmark
+
+| Method | Compute Time | Number of Samples | Cross Section (pb) | Error (pb) |
+|---|---:|---:|---:|---:|
+| MadGraph Native | 39.4 s | 1,360,036 | 9147.5 | 10.32 |
+| NF Training | 4.30 h | 3,838,650,240 | 13765.5 | 0.5931 |
+| NF Generation | 12.7 min | 72,000,000 | 13765.5 | 0.5931 |
+
+The NF generation uses 53× the native sample count and 19× the native wall
+time; the training campaign is 4.30 h of job time (1.19 h wall with four
+concurrent jobs). The 13765.5 pb NF entries are invalid because of the
+normalization failure above; the timing and sample counts are valid.
+
+### 8.7 Plots and data
+
+- `results/zj_hadronic_integral/plots/loss_ess_low.png` — low-range KL loss
+  and ESS versus cumulative time, six channels.
+- `results/zj_hadronic_integral/plots/loss_ess_high.png` — high-range version.
+- `results/zj_hadronic_integral/plots/interpolation_low.png` — six-channel
+  summed partonic NF versus exact MadEvent, low range.
+- `results/zj_hadronic_integral/plots/interpolation_high.png` — high range.
+- `results/zj_hadronic_integral/summary.json`, `per_channel.csv`,
+  `grid_*.csv`, `benchmark_table.md`.
+- `results/zj_hadronic_madevent_interpolation/<channel>/comparison.csv` —
+  exact partonic scan.
+- Code: `experiments/integrate_hadronic_process.py`,
+  `scripts/plot_nf_diagnostics.py`, `scripts/make_hadronic_benchmark_table.py`,
+  `scripts/timestamp_log.py`.
+
+### 8.8 Diagnosis and next steps
+
+- The high-range models are correct; the low-range `gu_zu` model is 20–25×
+  low at the threshold. The six-channel sum happens to match the exact
+  partonic curve because the per-channel errors compensate.
+- The final hadronic total is 1.5× high because the luminosity is 5–13× high
+  in the low range and ~1.5× high overall. The per-channel compensation
+  cancels in the partonic sum but not in the weighted integral.
+- The uncut test rules out the cuts as the cause: without the `p_T` cut the
+  integrand is collinearly divergent and the flow ESS collapses.
+- The low-range condition boundary is the main model suspect: with
+  `z=(sqrt(s-hat)-114)/136`, the 114–120 GeV threshold region occupies the
+  first ~4% of the condition axis. The fix is a log-sqrt(s-hat) condition
+  feature and log-uniform condition sampling, then retraining the six low
+  models.
+- The luminosity layer needs an independent audit: beam-ordering summation,
+  PDF-pair sum, and the `dL/dsqrt(s-hat)` Jacobian, checked against the native
+  per-subprocess rates.
+- The high-range models, the exact high comparison, and the
+  training/generation timing remain valid.
+
+### 8.9 Notes
+
+- The NF total 13765.5 ± 0.59 pb is recorded to document the current failure,
+  not as a production cross section.
+- The native default-dynamic result is 9010 ± 10 pb; the fixed-scale
+  comparison used by the NF side is 9147.5 ± 10.32 pb.
+- The NF is not competitive with native MadEvent for this 2-D integral even
+  before the normalization fix.

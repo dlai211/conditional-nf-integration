@@ -205,6 +205,11 @@ def compare_estimates(nf: dict, uniform: dict) -> tuple[float, float, float]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument(
+        "--channel",
+        default=None,
+        help="Channel name from the config's `channels` list (required for multi-subprocess configs).",
+    )
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--energies", type=float, nargs="+", default=None)
     parser.add_argument("--sobol-power", type=int, default=18)
@@ -212,7 +217,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--nf-evals", type=int, default=500_000)
     parser.add_argument("--gpu-chunk", type=int, default=10_000)
     parser.add_argument("--uniform-fraction", type=float, default=0.10)
-    parser.add_argument("--alpha-s", type=float, default=0.118)
+    parser.add_argument("--alpha-s", type=float, default=None)
     parser.add_argument("--seed", type=int, default=20260920)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument(
@@ -248,8 +253,19 @@ def main() -> None:
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
-    spec = load_process_spec(args.config)
-    evaluator = ConfiguredMadGraphIntegrand(spec, PROJECT, args.alpha_s)
+    config_data = json.loads(Path(args.config).read_text(encoding="utf-8"))
+    if config_data.get("channels") and args.channel is None:
+        raise ValueError(
+            "This config defines multiple channels; pass --channel with one of: "
+            + ", ".join(item["name"] for item in config_data["channels"])
+        )
+    spec = load_process_spec(args.config, channel=args.channel)
+    alpha_s = (
+        args.alpha_s
+        if args.alpha_s is not None
+        else float(spec.get("alpha_s", 0.118))
+    )
+    evaluator = ConfiguredMadGraphIntegrand(spec, PROJECT, alpha_s)
     condition = spec["condition"]
     minimum, maximum = float(condition["minimum"]), float(condition["maximum"])
     energies = args.energies or [float(item) for item in condition["held_out"]]

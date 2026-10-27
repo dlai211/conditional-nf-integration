@@ -1,0 +1,2 @@
+survey validate_228 --points=10000 --iterations=6 --accuracy=0.002
+refine 0.001 3

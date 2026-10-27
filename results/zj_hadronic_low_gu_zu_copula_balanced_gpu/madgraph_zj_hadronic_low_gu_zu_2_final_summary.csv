@@ -1,0 +1,2 @@
+benchmark,edges,ess,integral_estimate,log_integral_estimate,true_integral,absolute_integral_error,relative_integral_error,std_logw,graph
+madgraph_zj_hadronic_low_gu_zu_2,1,0.9591664507494759,3.686915744087459e-08,-17.1158904771211,,,,0.15631244146159926,"{0: [], 1: [0]}"

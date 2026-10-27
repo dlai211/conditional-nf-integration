@@ -1,0 +1,2 @@
+benchmark,edges,ess,integral_estimate,log_integral_estimate,true_integral,absolute_integral_error,relative_integral_error,std_logw,graph
+madgraph_gu_zu_2,1,0.3129929022229728,4.710149526883846e-09,-19.17354618273753,,,,1.1268405393893377,"{0: [], 1: [0]}"

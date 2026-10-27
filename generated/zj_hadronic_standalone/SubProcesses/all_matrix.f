@@ -1,0 +1,354 @@
+C     PY ((21, 2), (2, 23)) : (21, 2, 23, 2) # M0_ 1
+C     PY ((21, 4), (4, 23)) : (21, 4, 23, 4) # M0_ 1
+C     PY ((21, 1), (1, 23)) : (21, 1, 23, 1) # M1_ 1
+C     PY ((21, 3), (3, 23)) : (21, 3, 23, 3) # M1_ 1
+C     PY ((21, -2), (-2, 23)) : (21, -2, 23, -2) # M2_ 1
+C     PY ((21, -4), (-4, 23)) : (21, -4, 23, -4) # M2_ 1
+C     PY ((21, -1), (-1, 23)) : (21, -1, 23, -1) # M3_ 1
+C     PY ((21, -3), (-3, 23)) : (21, -3, 23, -3) # M3_ 1
+C     PY ((2, -2), (21, 23)) : (2, -2, 23, 21) # M4_ 1
+C     PY ((4, -4), (21, 23)) : (4, -4, 23, 21) # M4_ 1
+C     PY ((1, -1), (21, 23)) : (1, -1, 23, 21) # M5_ 1
+C     PY ((3, -3), (21, 23)) : (3, -3, 23, 21) # M5_ 1
+      SUBROUTINE F77_SMATRIXHEL(PDGS, PROCID, NPDG, P, ALPHAS, SCALE2,
+     $  NHEL, ANS)
+      IMPLICIT NONE
+C     ALPHAS is given at scale2 (SHOULD be different of 0 for loop
+C      induced, ignore for LO)  
+
+CF2PY double precision, intent(in), dimension(0:3,npdg) :: p
+CF2PY integer, intent(in), dimension(npdg) :: pdgs
+CF2PY integer, intent(in):: procid
+CF2PY integer, intent(in) :: npdg
+CF2PY double precision, intent(out) :: ANS
+CF2PY double precision, intent(in) :: ALPHAS
+CF2PY double precision, intent(in) :: SCALE2
+      INTEGER PDGS(*)
+      INTEGER NPDG, NHEL, PROCID
+      DOUBLE PRECISION P(*)
+      DOUBLE PRECISION ANS, ALPHAS, PI,SCALE2
+      INCLUDE 'coupl.inc'
+
+
+      IF (SCALE2.EQ.0)THEN
+        PI = 3.141592653589793D0
+        G = 2* DSQRT(ALPHAS*PI)
+        CALL UPDATE_AS_PARAM()
+      ELSE
+        CALL UPDATE_AS_PARAM2(SCALE2, ALPHAS)
+      ENDIF
+
+      IF(21.EQ.PDGS(1).AND.2.EQ.PDGS(2).AND.23.EQ.PDGS(3)
+     $ .AND.2.EQ.PDGS(4).AND.(PROCID.LE.0.OR.PROCID.EQ.1)) THEN  ! 0
+        CALL M0_SMATRIXHEL(P, NHEL, ANS)
+      ELSE IF(21.EQ.PDGS(1).AND.4.EQ.PDGS(2).AND.23.EQ.PDGS(3)
+     $ .AND.4.EQ.PDGS(4).AND.(PROCID.LE.0.OR.PROCID.EQ.1)) THEN  ! 1
+        CALL M0_SMATRIXHEL(P, NHEL, ANS)
+      ELSE IF(21.EQ.PDGS(1).AND.1.EQ.PDGS(2).AND.23.EQ.PDGS(3)
+     $ .AND.1.EQ.PDGS(4).AND.(PROCID.LE.0.OR.PROCID.EQ.1)) THEN  ! 2
+        CALL M1_SMATRIXHEL(P, NHEL, ANS)
+      ELSE IF(21.EQ.PDGS(1).AND.3.EQ.PDGS(2).AND.23.EQ.PDGS(3)
+     $ .AND.3.EQ.PDGS(4).AND.(PROCID.LE.0.OR.PROCID.EQ.1)) THEN  ! 3
+        CALL M1_SMATRIXHEL(P, NHEL, ANS)
+      ELSE IF(21.EQ.PDGS(1).AND.-2.EQ.PDGS(2).AND.23.EQ.PDGS(3).AND.
+     $ -2.EQ.PDGS(4).AND.(PROCID.LE.0.OR.PROCID.EQ.1)) THEN  ! 4
+        CALL M2_SMATRIXHEL(P, NHEL, ANS)
+      ELSE IF(21.EQ.PDGS(1).AND.-4.EQ.PDGS(2).AND.23.EQ.PDGS(3).AND.
+     $ -4.EQ.PDGS(4).AND.(PROCID.LE.0.OR.PROCID.EQ.1)) THEN  ! 5
+        CALL M2_SMATRIXHEL(P, NHEL, ANS)
+      ELSE IF(21.EQ.PDGS(1).AND.-1.EQ.PDGS(2).AND.23.EQ.PDGS(3).AND.
+     $ -1.EQ.PDGS(4).AND.(PROCID.LE.0.OR.PROCID.EQ.1)) THEN  ! 6
+        CALL M3_SMATRIXHEL(P, NHEL, ANS)
+      ELSE IF(21.EQ.PDGS(1).AND.-3.EQ.PDGS(2).AND.23.EQ.PDGS(3).AND.
+     $ -3.EQ.PDGS(4).AND.(PROCID.LE.0.OR.PROCID.EQ.1)) THEN  ! 7
+        CALL M3_SMATRIXHEL(P, NHEL, ANS)
+      ELSE IF(2.EQ.PDGS(1).AND.-2.EQ.PDGS(2).AND.23.EQ.PDGS(3)
+     $ .AND.21.EQ.PDGS(4).AND.(PROCID.LE.0.OR.PROCID.EQ.1)) THEN  ! 8
+        CALL M4_SMATRIXHEL(P, NHEL, ANS)
+      ELSE IF(4.EQ.PDGS(1).AND.-4.EQ.PDGS(2).AND.23.EQ.PDGS(3)
+     $ .AND.21.EQ.PDGS(4).AND.(PROCID.LE.0.OR.PROCID.EQ.1)) THEN  ! 9
+        CALL M4_SMATRIXHEL(P, NHEL, ANS)
+      ELSE IF(1.EQ.PDGS(1).AND.-1.EQ.PDGS(2).AND.23.EQ.PDGS(3)
+     $ .AND.21.EQ.PDGS(4).AND.(PROCID.LE.0.OR.PROCID.EQ.1)) THEN  ! 10
+        CALL M5_SMATRIXHEL(P, NHEL, ANS)
+      ELSE IF(3.EQ.PDGS(1).AND.-3.EQ.PDGS(2).AND.23.EQ.PDGS(3)
+     $ .AND.21.EQ.PDGS(4).AND.(PROCID.LE.0.OR.PROCID.EQ.1)) THEN  ! 11
+        CALL M5_SMATRIXHEL(P, NHEL, ANS)
+      ENDIF
+
+      RETURN
+      END
+
+      SUBROUTINE F77_INITIALISE(PATH)
+C     ROUTINE FOR F2PY to read the benchmark point.
+      IMPLICIT NONE
+      CHARACTER*512 PATH
+CF2PY INTENT(IN) :: PATH
+      CALL SETPARA(PATH)  !first call to setup the paramaters
+      RETURN
+      END
+
+
+      SUBROUTINE F77_CHANGE_PARA(NAME, VALUE)
+      IMPLICIT NONE
+CF2PY intent(in) :: name
+CF2PY intent(in) :: value
+
+      CHARACTER*512 NAME
+      DOUBLE PRECISION VALUE
+
+      LOGICAL M4_HELRESET
+      COMMON /M4_HELRESET/ M4_HELRESET
+      LOGICAL M1_HELRESET
+      COMMON /M1_HELRESET/ M1_HELRESET
+      LOGICAL M0_HELRESET
+      COMMON /M0_HELRESET/ M0_HELRESET
+      LOGICAL M3_HELRESET
+      COMMON /M3_HELRESET/ M3_HELRESET
+      LOGICAL M2_HELRESET
+      COMMON /M2_HELRESET/ M2_HELRESET
+      LOGICAL M5_HELRESET
+      COMMON /M5_HELRESET/ M5_HELRESET
+
+      INCLUDE '../Source/MODEL/input.inc'
+      INCLUDE '../Source/MODEL/coupl.inc'
+
+      M4_HELRESET = .TRUE.
+      M1_HELRESET = .TRUE.
+      M0_HELRESET = .TRUE.
+      M3_HELRESET = .TRUE.
+      M2_HELRESET = .TRUE.
+      M5_HELRESET = .TRUE.
+
+      SELECT CASE (NAME)
+      CASE ('MB')
+      MDL_MB = VALUE
+      CASE ('MASS_5')
+      MDL_MB = VALUE
+      CASE ('MT')
+      MDL_MT = VALUE
+      CASE ('MASS_6')
+      MDL_MT = VALUE
+      CASE ('MTA')
+      MDL_MTA = VALUE
+      CASE ('MASS_15')
+      MDL_MTA = VALUE
+      CASE ('MZ')
+      MDL_MZ = VALUE
+      CASE ('MASS_23')
+      MDL_MZ = VALUE
+      CASE ('MH')
+      MDL_MH = VALUE
+      CASE ('MASS_25')
+      MDL_MH = VALUE
+      CASE ('aEWM1')
+      AEWM1 = VALUE
+      CASE ('SMINPUTS_1')
+      AEWM1 = VALUE
+      CASE ('Gf')
+      MDL_GF = VALUE
+      CASE ('SMINPUTS_2')
+      MDL_GF = VALUE
+      CASE ('aS')
+      AS = VALUE
+      CASE ('SMINPUTS_3')
+      AS = VALUE
+      CASE ('ymb')
+      MDL_YMB = VALUE
+      CASE ('YUKAWA_5')
+      MDL_YMB = VALUE
+      CASE ('ymt')
+      MDL_YMT = VALUE
+      CASE ('YUKAWA_6')
+      MDL_YMT = VALUE
+      CASE ('ymtau')
+      MDL_YMTAU = VALUE
+      CASE ('YUKAWA_15')
+      MDL_YMTAU = VALUE
+      CASE ('WT')
+      MDL_WT = VALUE
+      CASE ('DECAY_6')
+      MDL_WT = VALUE
+      CASE ('WZ')
+      MDL_WZ = VALUE
+      CASE ('DECAY_23')
+      MDL_WZ = VALUE
+      CASE ('WW')
+      MDL_WW = VALUE
+      CASE ('DECAY_24')
+      MDL_WW = VALUE
+      CASE ('WH')
+      MDL_WH = VALUE
+      CASE ('DECAY_25')
+      MDL_WH = VALUE
+      CASE DEFAULT
+      WRITE(*,*) 'no parameter matching', NAME, VALUE
+      END SELECT
+
+      RETURN
+      END
+
+      SUBROUTINE F77_UPDATE_ALL_COUP()
+      IMPLICIT NONE
+      CALL COUP()
+      RETURN
+      END
+
+
+      SUBROUTINE F77_GET_PDG_ORDER(PDG, ALLPROC)
+      IMPLICIT NONE
+CF2PY INTEGER, intent(out) :: PDG(12,4)
+CF2PY INTEGER, intent(out) :: ALLPROC(12)
+      INTEGER PDG(12,4), PDGS(12,4)
+      INTEGER ALLPROC(12),PIDS(12)
+      DATA PDGS/ 21,21,21,21,21,21,21,21,2,4,1,3,2,4,1,3,-2,-4,-1,-3,
+     $ -2,-4,-1,-3,23,23,23,23,23,23,23,23,23,23,23,23,2,4,1,3,-2,-4,
+     $ -1,-3,21,21,21,21 /
+      DATA PIDS/ 1,1,1,1,1,1,1,1,1,1,1,1 /
+      PDG = PDGS
+      ALLPROC = PIDS
+      RETURN
+      END
+
+      SUBROUTINE F77_GET_PREFIX(PREFIX)
+      IMPLICIT NONE
+CF2PY CHARACTER*20, intent(out) :: PREFIX(12)
+      CHARACTER*20 PREFIX(12),PREF(12)
+      DATA PREF / 'M0_','M0_','M1_','M1_','M2_','M2_','M3_','M3_'
+     $ ,'M4_','M4_','M5_','M5_'/
+      PREFIX = PREF
+      RETURN
+      END
+
+
+
+      SUBROUTINE F77_SET_FIXED_EXTRA_SCALE(NEW_VALUE)
+      IMPLICIT NONE
+CF2PY logical, intent(in) :: new_value
+      LOGICAL NEW_VALUE
+      LOGICAL FIXED_EXTRA_SCALE
+      INTEGER MAXJETFLAVOR
+      DOUBLE PRECISION MUE_OVER_REF
+      DOUBLE PRECISION MUE_REF_FIXED
+      COMMON/MODEL_SETUP_RUNNING/MAXJETFLAVOR,FIXED_EXTRA_SCALE
+     $ ,MUE_OVER_REF,MUE_REF_FIXED
+
+      FIXED_EXTRA_SCALE = NEW_VALUE
+      RETURN
+      END
+
+      SUBROUTINE F77_SET_MUE_OVER_REF(NEW_VALUE)
+      IMPLICIT NONE
+CF2PY double precision, intent(in) :: new_value
+      DOUBLE PRECISION NEW_VALUE
+      LOGICAL FIXED_EXTRA_SCALE
+      INTEGER MAXJETFLAVOR
+      DOUBLE PRECISION MUE_OVER_REF
+      DOUBLE PRECISION MUE_REF_FIXED
+      COMMON/MODEL_SETUP_RUNNING/MAXJETFLAVOR,FIXED_EXTRA_SCALE
+     $ ,MUE_OVER_REF,MUE_REF_FIXED
+
+      MUE_OVER_REF = NEW_VALUE
+
+      RETURN
+      END
+
+      SUBROUTINE F77_SET_MUE_REF_FIXED(NEW_VALUE)
+      IMPLICIT NONE
+CF2PY double precision, intent(in) :: new_value
+      DOUBLE PRECISION NEW_VALUE
+      LOGICAL FIXED_EXTRA_SCALE
+      INTEGER MAXJETFLAVOR
+      DOUBLE PRECISION MUE_OVER_REF
+      DOUBLE PRECISION MUE_REF_FIXED
+      COMMON/MODEL_SETUP_RUNNING/MAXJETFLAVOR,FIXED_EXTRA_SCALE
+     $ ,MUE_OVER_REF,MUE_REF_FIXED
+
+      MUE_REF_FIXED = NEW_VALUE
+
+      RETURN
+      END
+
+
+      SUBROUTINE F77_SET_MAXJETFLAVOR(NEW_VALUE)
+      IMPLICIT NONE
+CF2PY integer, intent(in) :: new_value
+      INTEGER NEW_VALUE
+      LOGICAL FIXED_EXTRA_SCALE
+      INTEGER MAXJETFLAVOR
+      DOUBLE PRECISION MUE_OVER_REF
+      DOUBLE PRECISION MUE_REF_FIXED
+      COMMON/MODEL_SETUP_RUNNING/MAXJETFLAVOR,FIXED_EXTRA_SCALE
+     $ ,MUE_OVER_REF,MUE_REF_FIXED
+
+      MAXJETFLAVOR = NEW_VALUE
+
+      RETURN
+      END
+
+
+      SUBROUTINE F77_SET_ASMZ(NEW_VALUE)
+      IMPLICIT NONE
+CF2PY double precision, intent(in) :: new_value
+      DOUBLE PRECISION NEW_VALUE
+      INTEGER NLOOP
+      DOUBLE PRECISION ASMZ
+      COMMON/A_BLOCK/ASMZ,NLOOP
+      ASMZ = NEW_VALUE
+      WRITE(*,*) 'asmz is set to ', NEW_VALUE
+
+      RETURN
+      END
+
+      SUBROUTINE F77_SET_NLOOP(NEW_VALUE)
+      IMPLICIT NONE
+CF2PY integer, intent(in) :: new_value
+      INTEGER NEW_VALUE
+      INTEGER NLOOP
+      DOUBLE PRECISION ASMZ
+      COMMON/A_BLOCK/ASMZ,NLOOP
+      NLOOP = NEW_VALUE
+      WRITE(*,*) 'nloop is set to ', NEW_VALUE
+
+      RETURN
+      END
+
+
+      SUBROUTINE F77_M0_GET_NHEL_ENTRY(NHEL)
+      INTEGER M0_NHEL(4,24), NHEL(4,24)
+      COMMON/M0_PROCESS_NHEL/M0_NHEL
+      NHEL(:,:) = M0_NHEL(:,:)
+      RETURN
+      END
+      SUBROUTINE F77_M1_GET_NHEL_ENTRY(NHEL)
+      INTEGER M1_NHEL(4,24), NHEL(4,24)
+      COMMON/M1_PROCESS_NHEL/M1_NHEL
+      NHEL(:,:) = M1_NHEL(:,:)
+      RETURN
+      END
+      SUBROUTINE F77_M2_GET_NHEL_ENTRY(NHEL)
+      INTEGER M2_NHEL(4,24), NHEL(4,24)
+      COMMON/M2_PROCESS_NHEL/M2_NHEL
+      NHEL(:,:) = M2_NHEL(:,:)
+      RETURN
+      END
+      SUBROUTINE F77_M3_GET_NHEL_ENTRY(NHEL)
+      INTEGER M3_NHEL(4,24), NHEL(4,24)
+      COMMON/M3_PROCESS_NHEL/M3_NHEL
+      NHEL(:,:) = M3_NHEL(:,:)
+      RETURN
+      END
+      SUBROUTINE F77_M4_GET_NHEL_ENTRY(NHEL)
+      INTEGER M4_NHEL(4,24), NHEL(4,24)
+      COMMON/M4_PROCESS_NHEL/M4_NHEL
+      NHEL(:,:) = M4_NHEL(:,:)
+      RETURN
+      END
+      SUBROUTINE F77_M5_GET_NHEL_ENTRY(NHEL)
+      INTEGER M5_NHEL(4,24), NHEL(4,24)
+      COMMON/M5_PROCESS_NHEL/M5_NHEL
+      NHEL(:,:) = M5_NHEL(:,:)
+      RETURN
+      END
+
+

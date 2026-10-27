@@ -1,0 +1,78 @@
+{
+  "low_config": "/storage/users/dlai/conditional-nf-integration/configs/processes/zj_hadronic_low.json",
+  "high_config": "/storage/users/dlai/conditional-nf-integration/configs/processes/zj_hadronic_high.json",
+  "pdf": "NNPDF23_lo_as_0130_qed",
+  "lhaid": 247000,
+  "alpha_s": 0.13,
+  "scale_gev": 91.188,
+  "sqrt_s_gev": 13000.0,
+  "low_range_gev": [
+    114.0,
+    250.0
+  ],
+  "high_range_gev": [
+    200.0,
+    2000.0
+  ],
+  "grid_low_points": 60,
+  "grid_high_points": 60,
+  "nf_evals_per_point": 100000,
+  "nf_samples": 72000000,
+  "pdf_calls": 576000,
+  "generation_seconds": 759.697244532872,
+  "total_before_tail_pb": 13765.378165423617,
+  "tail_pb": 0.1389,
+  "tail_error_pb": 0.00026,
+  "total_pb": 13765.517065423617,
+  "total_error_pb": 0.5930600057230518,
+  "channels": [
+    {
+      "channel": "gu_zu",
+      "integral_pb": 3461.6027603376015,
+      "error_pb": 0.2832442894910207,
+      "ess_mean": 0.9654161998148482,
+      "grid_points": 120,
+      "nf_samples": 12000000
+    },
+    {
+      "channel": "gd_zd",
+      "integral_pb": 2986.6907378114106,
+      "error_pb": 0.24350225736908282,
+      "ess_mean": 0.9670981237652743,
+      "grid_points": 120,
+      "nf_samples": 12000000
+    },
+    {
+      "channel": "gux_zux",
+      "integral_pb": 1151.6754368175475,
+      "error_pb": 0.09331014614200661,
+      "ess_mean": 0.9718247754745893,
+      "grid_points": 120,
+      "nf_samples": 12000000
+    },
+    {
+      "channel": "gdx_zdx",
+      "integral_pb": 1654.7309726942087,
+      "error_pb": 0.12786455497808183,
+      "ess_mean": 0.9689796890010065,
+      "grid_points": 120,
+      "nf_samples": 12000000
+    },
+    {
+      "channel": "uux_zg",
+      "integral_pb": 2288.6263815066195,
+      "error_pb": 0.30442570082722253,
+      "ess_mean": 0.9646708903566825,
+      "grid_points": 120,
+      "nf_samples": 12000000
+    },
+    {
+      "channel": "ddx_zg",
+      "integral_pb": 2222.0518762562283,
+      "error_pb": 0.30735694363098903,
+      "ess_mean": 0.9648961747959802,
+      "grid_points": 120,
+      "nf_samples": 12000000
+    }
+  ]
+}

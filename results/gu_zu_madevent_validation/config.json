@@ -1,0 +1,29 @@
+{
+  "config": "configs/processes/gu_zu.json",
+  "mg5": "/storage/users/dlai/mango-linux/bin/mg5_aMC",
+  "process_dir": null,
+  "param_card": null,
+  "energies": null,
+  "width_window": 15.0,
+  "ren_scale": 91.188,
+  "required_accuracy": 0.002,
+  "nevents": 10000,
+  "survey_points": 10000,
+  "survey_iterations": 8,
+  "survey_accuracy": 0.001,
+  "refine_accuracy": 0.0002,
+  "refine_max_channels": 5,
+  "seed": 260919,
+  "run_prefix": "validate",
+  "validation_summary": null,
+  "output": "results/gu_zu_madevent_validation",
+  "process": "g u > z u @1",
+  "resolved_energies": [
+    250.0,
+    400.0,
+    650.0,
+    1000.0,
+    1500.0,
+    1950.0
+  ]
+}
