@@ -107,6 +107,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--uniform-fraction", type=float, default=0.10)
     parser.add_argument("--grid-low-points", type=int, default=60)
     parser.add_argument("--grid-high-points", type=int, default=60)
+    parser.add_argument(
+        "--split", type=float, default=None,
+        help=(
+            "sqrt(s-hat) split between the low and high models. Defaults to "
+            "the low config maximum (250 GeV). The low model condition range "
+            "is unchanged; this only moves the integration boundary."
+        ),
+    )
     parser.add_argument("--y-points", type=int, default=200)
     parser.add_argument("--seed", type=int, default=20261026)
     parser.add_argument("--tail-pb", type=float, default=0.1389)
@@ -150,11 +158,22 @@ def main() -> None:
     low_max = float(low_config["condition"]["maximum"])
     high_min = float(high_config["condition"]["minimum"])
     high_max = float(high_config["condition"]["maximum"])
-    split = low_max  # 250 GeV; the low model ends here and the high model starts
-    low_grid = np.geomspace(low_min, low_max, args.grid_low_points)
-    # The low model owns [114, 250]; the high model owns [250, 2000].  The
-    # high config is trained from 200 GeV so that the 200--250 GeV overlap can
-    # be used as a consistency check, but it must not be double-counted here.
+    split = float(args.split) if args.split is not None else low_max
+    if not (low_min < split <= low_max):
+        raise ValueError(
+            f"--split must lie in the low model range ({low_min}, {low_max}], "
+            f"got {split}"
+        )
+    if not (high_min <= split < high_max):
+        raise ValueError(
+            f"--split must lie in the high model range [{high_min}, {high_max}), "
+            f"got {split}"
+        )
+    low_grid = np.geomspace(low_min, split, args.grid_low_points)
+    # The low model is trained on [114, 250] and the high model on
+    # [200, 2000].  The integration boundary is normally 250 GeV; --split
+    # moves it (e.g. 200 GeV to match the native slices) without changing
+    # either model's condition normalization.
     high_grid = np.geomspace(split, high_max, args.grid_high_points)
 
     device = torch.device(args.device)
@@ -267,8 +286,9 @@ def main() -> None:
         "alpha_s": alpha_s,
         "scale_gev": beam["scale"],
         "sqrt_s_gev": sqrts,
-        "low_range_gev": [low_min, low_max],
-        "high_range_gev": [high_min, high_max],
+        "split_gev": split,
+        "low_range_gev": [low_min, split],
+        "high_range_gev": [split, high_max],
         "grid_low_points": args.grid_low_points,
         "grid_high_points": args.grid_high_points,
         "nf_evals_per_point": args.nf_evals,

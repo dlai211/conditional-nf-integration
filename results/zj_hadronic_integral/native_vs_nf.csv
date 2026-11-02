@@ -1,0 +1,7 @@
+run,acceptance,scale,pdf,sigma_pb,error_pb,source
+native_fixed_etaj_2p5,|eta_j|<2.5,fixed 91.188,nn23lo1,9147.5,10.32,scratch_ppzj native fixed-scale run / benchmark_table.md
+native_noeta_highstat,etaj=-1 (no cut),fixed 91.188,nn23lo1,11915.0,7.346,madgraph_baselines/z_1jet_noeta/SubProcesses/results.dat
+native_noeta_lowstat,etaj=-1 (no cut),fixed 91.188,nn23lo1,11924.0,16.586,madgraph_baselines/z_1jet_noeta/noeta_run5.log
+native_wide_etaj_5,|eta_j|<5.0,dynamic,nn23lo1,11668.4,72.03,madgraph_baselines/z_1jet/SubProcesses/results.dat
+nf_lhapdf,|eta_j|<2.5,fixed 91.188,NNPDF23_lo_as_0130_qed (247000),13765.517,0.593060,results/zj_hadronic_integral/summary.json
+exact_partonic_convolution,|eta_j|<2.5,fixed 91.188,NNPDF23_lo_as_0130_qed (247000),13761.97,,results/zj_hadronic_integral/normalization_audit.csv

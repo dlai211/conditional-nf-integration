@@ -2,7 +2,8 @@
 
 Commands used for the `zj_hadronic_low` / `zj_hadronic_high` campaign on the
 `odyssey` node. Paths are absolute as used. The results and their caveats are
-in `RESULTS.md` §8.
+in `RESULTS.md` §8 and the standalone report
+[`REPORT_ZJ_HADRONIC.md`](REPORT_ZJ_HADRONIC.md).
 
 ## 0. Prerequisites
 
@@ -101,8 +102,10 @@ logs/hadronic-balanced-hb-{low,high}-{channel}-<jobid>.log
 ```
 
 Four jobs × 48 CPUs run concurrently; the campaign wall was 1.19 h and the
-summed job time 4.30 h. The low `g q` models reach ESS ≈ 0.96, low `q q~`
-≈ 0.78, high ≈ 0.31.
+summed job time 4.30 h. The low `g q` models reach training/held-out ESS
+≈ 0.96, low `q q~` ≈ 0.78, high ≈ 0.23–0.31. The high range therefore has
+the lower **training** ESS. The integration-grid ESS is high in both ranges
+(low mean 0.962, high mean 0.972); see `plots/ess_summary.png`.
 
 ## 4. Exact partonic MadEvent interpolation
 
@@ -121,9 +124,10 @@ Outputs:
 results/zj_hadronic_madevent_interpolation/<channel>/comparison.csv
 ```
 
-In this run the exact scan showed the high-range models agreeing at
-1228.57 GeV (e.g. `gu_zu` 0.6086 vs 0.60815 pb) and the low-range `gu_zu`
-20–25× low at 114–120 GeV.
+All six channels agree with the exact scan: at 1228.57 GeV the high-range
+models are within 0.3% (e.g. `gu_zu` 0.6086 vs 0.60815 pb), and at 114 GeV the
+low-range models are within 0.6% (e.g. `gu_zu` 4.778 vs 4.754 pb; the
+118.76 pb value is `uux_zg`, not `gu_zu`).
 
 ## 5. Luminosity integration
 
@@ -141,6 +145,10 @@ python3 -u "$REPO/experiments/integrate_hadronic_process.py" \
   --device cuda --output "$REPO/results/zj_hadronic_integral"
 ```
 
+Use `--split 200` to move the low/high boundary to 200 GeV for comparison
+with the native `[0,200]` / `[200,2000]` slices. The low model condition
+range stays `[114,250]`; only the integration grid boundary moves.
+
 It evaluates each NF on 60 log-spaced points per range, multiplies by
 `dL/dsqrt(s-hat)`, integrates, sums the six channels, and adds the
 0.1389 ± 0.00026 pb `[2000, 13000]` tail. Outputs:
@@ -150,29 +158,41 @@ results/zj_hadronic_integral/summary.json
 results/zj_hadronic_integral/per_channel.csv
 results/zj_hadronic_integral/grid_<channel>.csv
 results/zj_hadronic_integral/interpolation_{low,high}.csv
+results/zj_hadronic_integral/ess_summary.csv
+results/zj_hadronic_integral/normalization_audit.csv
 ```
 
 Recorded result: **13765.5 ± 0.59 pb**, 1.50× the native 9147.5 ± 10.32 pb.
-This is **not a valid result**; the low-range luminosity is 5–13× high and the
-low `gu_zu` model is 20–25× low at the threshold.
+This is **not a production result**. The NF grid agrees with the exact
+partonic convolution **13761.97 pb** at 0.03% (`scripts/
+audit_hadronic_normalization.py`); the discrepancy is between that LHAPDF
+convolution and the native `p p > z j` run. The old "luminosity 5–13× high" and
+"`gu_zu` 20–25× low" claims are withdrawn. c/s are included, and the 200–250
+GeV overlap is not double-counted because the high grid starts at 250 GeV.
 
 ## 6. Plots and benchmark table
 
 ```bash
 cd /home/users/dlai/conditional-nf-integration
 python3 scripts/plot_nf_diagnostics.py
+python3 scripts/audit_hadronic_normalization.py
 python3 scripts/make_hadronic_benchmark_table.py
 ```
 
 Outputs:
 
 ```text
-results/zj_hadronic_integral/plots/loss_ess_low.png
-results/zj_hadronic_integral/plots/loss_ess_high.png
+results/zj_hadronic_integral/plots/ess_summary.png
 results/zj_hadronic_integral/plots/interpolation_low.png
 results/zj_hadronic_integral/plots/interpolation_high.png
 results/zj_hadronic_integral/benchmark_table.md
 ```
+
+`ess_summary.png` uses the saved final summaries and grid CSVs, so it is the
+report figure. The legacy `loss_ess_low.png` / `loss_ess_high.png` trajectory
+plots require the server logs; the plotting script fixes their stage/channel
+labelling for a future run. The interpolation plots now show the six-channel
+sum and a lower NF/MadEvent ratio panel.
 
 ## 7. Write RESULTS.md
 
@@ -235,10 +255,10 @@ python3 -u /home/users/dlai/conditional-nf-integration/experiments/run_madgraph_
 ```
 
 The uncut integrand is collinearly divergent: the smoke's final ESS is
-**0.0029** versus **0.865** with cuts. The cuts are the jet definition, not
-the source of the low-model bias; do not use the uncut low config for
-production. Restore the `cuts` block in `zj_hadronic_low.json` before any
-integration.
+**0.0029** versus **0.865** with cuts. The cuts are the jet definition and
+keep the integrand finite; the cut low model agrees with partonic MadEvent at
+the 0.6% level. Do not use the uncut low config for production. Restore the
+`cuts` block in `zj_hadronic_low.json` before any integration.
 
 ## 10. Known issues / troubleshooting
 
@@ -260,12 +280,26 @@ integration.
   no-`@1` process string.
 - **Scale**: the native default is dynamic (9010 pb); the fixed-scale
   comparison used with the NF is 9147.5 pb.
-- **NF normalization failure**: the 13765.5 pb NF total is invalid. The
-  high-range models match the exact partonic scan; the low-range `gu_zu`
-  model is 20–25× low at 114–120 GeV, and the luminosity is 5–13× high in the
-  low range. Do not quote the NF total as a physics result. The planned fix is
-  a log-`sqrt(s-hat)` condition feature plus log-uniform condition sampling
-  for the six low models, followed by a luminosity audit.
+- **NF/vs-native normalization discrepancy**: the 13765.5 pb NF total is not
+  a production result. The partonic models match the exact scan (low 0.6%,
+  high 0.3%), and convolving the exact partonic scan with LHAPDF gives
+  13761.97 pb, so the NF grid is consistent with the exact partonic input.
+  The 1.50× gap is between that convolution and the native `p p > z j` total
+  9147.5 pb. The old "`gu_zu` 20–25× low" and "luminosity 5–13× high" claims
+  are withdrawn. Next: run native with `pdlabel=lhapdf`, `lhaid=247000`, same
+  cuts/scale, and compare per-subprocess rates with the exact scan. Do not
+  retrain the low models for this issue.
+- **No-rapidity native test**: `etaj=-1`, `ptj=20`, fixed scale 91.188 GeV,
+  `nn23lo1` gives **11915 ± 7.35 pb** (100k×10 survey; 20k×8 gives
+  11924 ± 16.59 pb). The NF is still 15.5% above this; the missing lab-frame
+  boost is not the full explanation. The test directory is
+  `C:/Users/laiji/test/madgraph_baselines/z_1jet_noeta`.
+- **Native LHAPDF on Windows**: the local `z_1jet_noeta` build recognized
+  LHAPDF 6.5.6 but the generated MadEvent executable aborted with
+  `LHAPDF::ReadError: Could not find any pdfsets.index files` despite
+  `LHAPDF_DATA_PATH` and local index copies. The static library works in a
+  standalone C++ test and the Python shim; run this test on the Linux server
+  or fix the generated MadEvent Windows runtime path resolution.
 - **NF performance**: for this 2-D integral the NF is not competitive:
   generation uses 72M samples / 12.7 min and training 3.84×10⁹ samples /
   4.30 h, versus 1.36M samples / 39.4 s for native MadEvent.

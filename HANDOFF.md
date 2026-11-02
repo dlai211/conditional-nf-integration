@@ -1,5 +1,10 @@
 # Session handoff — `gg_zjj` balanced run (2026-10-26)
 
+> **Current focus (2026-11-02):** the hadronic `pp -> Z + j` campaign is
+> reported in [`REPORT_ZJ_HADRONIC.md`](REPORT_ZJ_HADRONIC.md). The 12 models
+> and the integration/partonic audits are complete. The `gg_zjj` balanced run
+> described below remains paused; do not restart it for the Z+jet report.
+
 **Repo:** `C:/Users/laiji/test/conditional-nf-integration` (branch `main`;
 previous HEAD `938f31f`).
 **Read first:** this file, then `CLAUDE.md` (machine policy) and

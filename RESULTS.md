@@ -790,7 +790,8 @@ This section replaces the earlier partonic Z + jets smoke campaign. It records
 the first hadronic `p p > z j` implementation (Option 1 luminosity layer plus
 Option B range split), the 12 balanced conditional NFs, the native MadEvent
 baseline, the exact partonic interpolation, the cut-removal test, and the
-performance benchmark.
+performance benchmark. The standalone report is
+[`REPORT_ZJ_HADRONIC.md`](REPORT_ZJ_HADRONIC.md).
 
 ### 8.1 Setup
 
@@ -804,9 +805,12 @@ performance benchmark.
   channels per range, 12 balanced models. Held-out low points 120, 150, 180,
   210, 240 GeV; high points 250, 400, 650, 1000, 1500, 1950 GeV.
 - Fiducial cuts: `p_T,j > 20` GeV, `|eta_j| < 2.5`.
-- PDF: LHAPDF `NNPDF23_lo_as_0130_qed`, ID **247000**, member 0. This is the
-  set behind MG5's `nn23lo1`. The run card's requested ID 230000 is
-  `NNPDF23_nlo_as_0119` and does not match the baseline.
+- PDF: LHAPDF `NNPDF23_lo_as_0130_qed`, ID **247000**, member 0. This is
+  nominally the set behind MG5's `nn23lo1` (MG5 maps `nn23lo1` to
+  `NNPDF23_lo_as_0130_qed_mem0.grid`). The run card's requested ID 230000 is
+  `NNPDF23_nlo_as_0119` and does not match the baseline. A native run with
+  `pdlabel=lhapdf`, `lhaid=247000` is still needed to rule out an
+  implementation-level difference.
 - `alpha_s = 0.130`; fixed renormalization and factorization scale 91.188 GeV.
 - Configs: `configs/processes/zj_hadronic_low.json`,
   `configs/processes/zj_hadronic_high.json`.
@@ -833,9 +837,14 @@ performance benchmark.
 | high | `ddx_zg` | 0.2309 | 3.2770e-08 | 1.2184 | 21m26s |
 
 The low `g q` channels reach ESS ≈ 0.96; the low `q q~` channels ≈ 0.78; the
-high models ≈ 0.31. `std_logw` is finite for every model. The training
-campaign wall time was 1.19 h with four concurrent 48-CPU jobs; the summed job
-time is 4.30 h.
+high models ≈ 0.23–0.31. `std_logw` is finite for every model. The high range
+therefore has the **lower training/held-out ESS**: 0.231–0.313 versus
+0.775–0.963 in the low range. The integration ESS is a different quantity and
+is high in both ranges: low mean 0.962 (minimum 0.467 at the 114 GeV
+threshold), high mean 0.972 (minimum 0.735). The high range is only ~10% of
+the hadronic integral. See `plots/ess_summary.png` and `ess_summary.csv`.
+The training campaign wall time was 1.19 h with four concurrent 48-CPU jobs;
+the summed job time is 4.30 h.
 
 ### 8.3 Luminosity integration
 
@@ -854,12 +863,30 @@ is added for the `[2000, 13000]` GeV tail.
 | `ddx_zg` | 2222.05 | 0.3074 | 0.9649 |
 | **total + tail** | **13765.5** | **0.5931** | — |
 
-The NF total is **1.50×** the native 9147.5 ± 10.32 pb. This is **not a valid
-physics result**. The low-range `gu_zu` partonic cross section is ~20× low at
-114–120 GeV, while the luminosity is 5–13× high in the low range: the code
-gives `L(114)=4.05` and `L(120)≈3.5 GeV^-1`, versus native-implied values near
-0.82 and 0.29. The channel sum compensates in the partonic interpolation plot
-but not in the luminosity-weighted total.
+The NF total is **1.50×** the native 9147.5 ± 10.32 pb and 1.18× the native
+`etaj=5.0` baseline 11668.4 ± 72.03 pb, despite the narrower `|eta_j|<2.5`
+cut. This is **not a valid physics result**. The partonic NF models are not
+the source: at 114 GeV all six channels agree with the exact partonic
+MadEvent at the 0.5% level (for example `gu_zu` 4.778 vs 4.754 pb; the
+118.76 pb entry belongs to `uux_zg`, not `gu_zu`). Convolving the exact
+partonic scan with the same LHAPDF luminosity gives 13761.97 pb, so the NF
+grid agrees with the exact partonic input at 0.03% (`scripts/
+audit_hadronic_normalization.py`, `normalization_audit.csv`). The 1.50×
+therefore sits between this LHAPDF convolution and the native `p p > z j`
+run, not between the NF and the matrix element. The leading candidates are
+the native PDF/luminosity implementation and native run-card details; the
+nominal set is the same (`nn23lo1` / LHAPDF 247000), so a native run with
+`pdlabel=lhapdf`, `lhaid=247000` and a per-subprocess comparison are required.
+The c/s PDF pairs are included, and the 200–250 GeV overlap is not
+double-counted (the high grid starts at 250 GeV).
+
+Splitting the saved grid at 200 GeV (to match the native slices) gives NF
+low [114,200] **10883.96 pb** and high [200,2000] **2881.42 pb**; the exact
+partonic convolution gives 10858.09 and 2909.34 pb. The native dynamic-scale
+slices are 6665 pb in [0,200] and 2336 pb in [200,2000], so the NF/native
+ratios are about **1.63 low** and **1.23 high**. The native fixed-scale
+9,147.5 pb run has no saved slice breakdown; a native run with `dsqrt_shat`
+cuts is needed for exact fixed-scale low/high numbers.
 
 ### 8.4 Exact partonic interpolation
 
@@ -872,21 +899,27 @@ PDF, `alpha_s`, and cuts. High range at 1228.57 GeV:
 | `gd_zd` | 0.7796 ± 0.0004 | 0.77988 ± 0.00031 | 0.9996 |
 | `gux_zux` | 0.6083 ± 0.0004 | 0.60815 ± 0.00024 | 1.0002 |
 | `gdx_zdx` | 0.7803 ± 0.0009 | 0.77988 ± 0.00031 | 1.0005 |
+| `uux_zg` | 2.4108 ± 0.0017 | 2.4029 ± 0.0054 | 1.0033 |
+| `ddx_zg` | 3.0919 ± 0.0021 | 3.0814 ± 0.0069 | 1.0034 |
 
-The high-range models agree with the exact matrix element. Low range
-`gu_zu`:
+All six high-range models agree with the exact matrix element. Low range at
+114 GeV:
 
-| sqrt(s-hat) (GeV) | NF (pb) | MadEvent (pb) | ratio |
-|---:|---:|---:|---:|
-| 114 | 4.78 ± 0.02 | 118.76 ± 0.08 | 0.040 |
-| 116.776 | 10.04 ± 0.02 | 229.82 ± 0.13 | 0.044 |
-| 119.551 | 12.46 ± 0.02 | 263.42 ± 0.18 | 0.047 |
-| 250 | ≈10.4 | ≈10.4 | ≈1 |
+| channel | NF (pb) | MadEvent (pb) | ratio |
+|---|---:|---:|---:|
+| `gu_zu` | 4.778 ± 0.023 | 4.754 ± 0.003 | 1.005 |
+| `gd_zd` | 6.106 ± 0.027 | 6.096 ± 0.004 | 1.002 |
+| `gux_zux` | 4.784 ± 0.021 | 4.754 ± 0.003 | 1.006 |
+| `gdx_zdx` | 6.088 ± 0.026 | 6.096 ± 0.004 | 0.999 |
+| `uux_zg` | 117.99 ± 0.57 | 118.76 ± 0.08 | 0.994 |
+| `ddx_zg` | 151.84 ± 0.73 | 152.30 ± 0.10 | 0.997 |
 
-The six-channel **summed** partonic curve in `interpolation_low.png` overlaps
-the exact MadEvent points; the per-channel `gu_zu` is ~20–25× low below
-120 GeV and the other channels compensate. The cuts are applied to both the NF
-and MadEvent sides of this comparison.
+All six low-range channels agree at the 0.6% level. The 118.76 pb value in
+the old table was `uux_zg`, not `gu_zu`; the `gu_zu` value at 114 GeV is
+4.78 pb vs 4.75 pb. The six-channel **summed** partonic curve in
+`interpolation_low.png` is the quantity plotted; the old "20–25× low"
+diagnosis came from comparing the wrong channel and is withdrawn. The cuts
+are applied to both the NF and MadEvent sides of this comparison.
 
 ### 8.5 Cut-removal test
 
@@ -894,8 +927,9 @@ The low config was rerun without the `p_T,j > 20` / `|eta_j| < 2.5` cuts. The
 uncut `g u > z u` integrand is collinearly divergent (the final quark can be
 collinear with the initial quark), so the uncut low-range model's final ESS
 collapses to **0.0029** versus **0.865** for the cut smoke; `Ihat` moves from
-3.69e-08 to 1.74e-07 GeV^-2. The cuts are the jet definition, not the source
-of the low-model bias. The cut config was restored.
+3.69e-08 to 1.74e-07 GeV^-2. The cuts are the jet definition and keep the
+integrand finite; the cut low model agrees with partonic MadEvent at the 0.6%
+level. The cut config was restored.
 
 ### 8.6 Performance benchmark
 
@@ -907,51 +941,91 @@ of the low-model bias. The cut config was restored.
 
 The NF generation uses 53× the native sample count and 19× the native wall
 time; the training campaign is 4.30 h of job time (1.19 h wall with four
-concurrent jobs). The 13765.5 pb NF entries are invalid because of the
-normalization failure above; the timing and sample counts are valid.
+concurrent jobs). The 13765.5 pb NF entries are not production cross sections
+because of the unresolved native-vs-convolution discrepancy above; the timing
+and sample counts are valid, and the NF grid agrees with the exact partonic
+convolution at 0.03%.
 
 ### 8.7 Plots and data
 
-- `results/zj_hadronic_integral/plots/loss_ess_low.png` — low-range KL loss
-  and ESS versus cumulative time, six channels.
-- `results/zj_hadronic_integral/plots/loss_ess_high.png` — high-range version.
+- `results/zj_hadronic_integral/plots/ess_summary.png` — **training/held-out
+  ESS** and **integration-grid ESS**, split by low/high range. The high range
+  has the lower training ESS; integration ESS is high in both.
 - `results/zj_hadronic_integral/plots/interpolation_low.png` — six-channel
-  summed partonic NF versus exact MadEvent, low range.
-- `results/zj_hadronic_integral/plots/interpolation_high.png` — high range.
+  summed partonic NF versus exact MadEvent for the low range, with a
+  NF/MadEvent ratio panel.
+- `results/zj_hadronic_integral/plots/interpolation_high.png` — high range,
+  same two-panel format.
+- `results/zj_hadronic_integral/plots/loss_ess_low.png` and
+  `loss_ess_high.png` — legacy training-trajectory plots. The raw server logs
+  are not archived in this checkout, so these could not be regenerated here;
+  `scripts/plot_nf_diagnostics.py` now fixes their stage/channel labelling for
+  a future run with logs. Use `ess_summary.png` for the report.
 - `results/zj_hadronic_integral/summary.json`, `per_channel.csv`,
-  `grid_*.csv`, `benchmark_table.md`.
+  `grid_*.csv`, `ess_summary.csv`, `normalization_audit.csv`,
+  `native_vs_nf.csv`, `benchmark_table.md`, and `plots/README.md`
+  (current vs legacy figures).
 - `results/zj_hadronic_madevent_interpolation/<channel>/comparison.csv` —
   exact partonic scan.
 - Code: `experiments/integrate_hadronic_process.py`,
-  `scripts/plot_nf_diagnostics.py`, `scripts/make_hadronic_benchmark_table.py`,
-  `scripts/timestamp_log.py`.
+  `scripts/plot_nf_diagnostics.py`, `scripts/audit_hadronic_normalization.py`,
+  `scripts/make_hadronic_benchmark_table.py`, `scripts/timestamp_log.py`.
 
 ### 8.8 Diagnosis and next steps
 
-- The high-range models are correct; the low-range `gu_zu` model is 20–25×
-  low at the threshold. The six-channel sum happens to match the exact
-  partonic curve because the per-channel errors compensate.
-- The final hadronic total is 1.5× high because the luminosity is 5–13× high
-  in the low range and ~1.5× high overall. The per-channel compensation
-  cancels in the partonic sum but not in the weighted integral.
-- The uncut test rules out the cuts as the cause: without the `p_T` cut the
-  integrand is collinearly divergent and the flow ESS collapses.
-- The low-range condition boundary is the main model suspect: with
-  `z=(sqrt(s-hat)-114)/136`, the 114–120 GeV threshold region occupies the
-  first ~4% of the condition axis. The fix is a log-sqrt(s-hat) condition
-  feature and log-uniform condition sampling, then retraining the six low
-  models.
-- The luminosity layer needs an independent audit: beam-ordering summation,
-  PDF-pair sum, and the `dL/dsqrt(s-hat)` Jacobian, checked against the native
-  per-subprocess rates.
-- The high-range models, the exact high comparison, and the
-  training/generation timing remain valid.
+- **All twelve partonic models are correct.** At 114 GeV the six low-range
+  channels agree with exact MadEvent at 0.6%; at 1228.57 GeV the six
+  high-range channels agree at 0.3%. The old "`gu_zu` 20–25× low" claim was a
+  channel mix-up: 118.76 pb is `uux_zg`; `gu_zu` is 4.78 vs 4.75 pb.
+- **The NF hadronic grid is internally consistent.** Convolving the exact
+  partonic MadEvent scan with the same LHAPDF luminosity gives 13761.97 pb;
+  the NF grid gives 13765.38 pb (ratio 1.00025). The ~1.50× discrepancy is
+  between that convolution and the native `p p > z j` total 9147.5 pb, not
+  between the NF and the matrix element.
+- **No-rapidity native test (2026-11-02).** Native `p p > z j` with
+  `etaj=-1`, `ptj=20`, fixed scale 91.188 GeV and `nn23lo1` gives
+  **11915 ± 7.35 pb** (100k×10 survey; the 20k×8 survey gives
+  11924 ± 16.59 pb). Removing the rapidity cut adds 2768 pb (30.2%), but the
+  NF is still 1850 pb (15.5%) above the no-rapidity native result. The NF
+  applies `|eta_j|<2.5`, so a correct NF should be below the no-rapidity
+  value; it is above it. The hypothesis that the discrepancy is strictly the
+  missing lab-frame boost is not confirmed; about 60% of the 4618 pb gap is
+  accounted for, leaving a residual ~15% normalization difference.
+- **Native LHAPDF attempt (2026-11-02).** Rebuilding the local Windows
+  `z_1jet_noeta` `Source/PDF` with LHAPDF 6.5.6 was recognized by MadEvent,
+  but the generated Fortran executable aborted at runtime with
+  `LHAPDF::ReadError: Could not find any pdfsets.index files` despite
+  `LHAPDF_DATA_PATH` and local `pdfsets.index` copies. The static library
+  works in a standalone C++ test and the Python shim; this is a Windows
+  generated-MadEvent/LHAPDF runtime-path problem, not a physics result. The
+  PDF-matched native test remains open and should be run on the Linux server.
+- **The old luminosity diagnosis is withdrawn.** There is no evidence for a
+  5–13× high luminosity layer: the NF grid and the exact partonic convolution
+  agree. A shared luminosity/convention error is not ruled out by that
+  check, but the native 9147.5 and 11668.4 runs are the outliers relative to
+  the LHAPDF convolution, so the next check is the native side.
+- **c/s are included and the range split is clean.** `pdf_pairs` contain c/s;
+  b is excluded on both sides by `maxjetflavor=4`; the high grid starts at
+  250 GeV, so the 200–250 GeV overlap is not double-counted.
+- **ESS must be reported by metric.** Training/held-out ESS is lower in the
+  high range (0.231–0.313 vs 0.775–0.963). Integration-grid ESS is high in
+  both ranges (low mean 0.962, high 0.972); the only low integration point is
+  114 GeV (0.467). The high range is ~10% of the integral.
+- **Next steps:** run native `p p > z j` with `pdlabel=lhapdf`,
+  `lhaid=247000`, the same cuts/scale, and compare per-subprocess rates with
+  `madevent_interpolation`; if it still gives ~9147 pb, audit the native run
+  card/PDF. Optional: retrain high-range models only if high-region sampling
+  efficiency is itself a deliverable. The high-range partonic comparison and
+  the training/generation timing remain valid.
 
 ### 8.9 Notes
 
-- The NF total 13765.5 ± 0.59 pb is recorded to document the current failure,
-  not as a production cross section.
+- The NF total 13765.5 ± 0.59 pb is recorded to document the unresolved
+  native-vs-convolution normalization discrepancy, not as a production cross
+  section. The NF grid agrees with the exact partonic convolution 13761.97 pb
+  at 0.03%.
 - The native default-dynamic result is 9010 ± 10 pb; the fixed-scale
-  comparison used by the NF side is 9147.5 ± 10.32 pb.
+  comparison used by the NF side is 9147.5 ± 10.32 pb. The native
+  `etaj=5.0` baseline is 11668.4 ± 72.03 pb.
 - The NF is not competitive with native MadEvent for this 2-D integral even
-  before the normalization fix.
+  before the normalization question is resolved.
