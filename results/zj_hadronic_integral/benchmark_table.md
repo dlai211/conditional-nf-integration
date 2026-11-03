@@ -12,10 +12,12 @@ is the fixed-scale run used consistently by both the native and NF sides.
 | NF Training | 4.30 h | 3,838,650,240 | 13765.5 | 0.5931 |
 | NF Generation | 12.7 min | 72,000,000 | 13765.5 | 0.5931 |
 
-Training campaign wall time with four concurrent 48-CPU jobs: 1.19 h.  The NF training samples count the
-matrix-element evaluations at the weighted-cache builds, the KL batches
-(30,000 points/step), the chi-square batches (16,384
-points/step) and the final 100,000-sample ESS estimate.
+Training campaign wall time with four concurrent 48-CPU jobs: 1.19 h. The NF
+training sample budget counts the weighted-cache builds, the cached KL
+batches (30,000 points/step), the cached chi-square batches (16,384
+points/step), and the final 100,000-sample ESS estimate. The KL and chi-square
+batches reuse cached points; the total is a work/budget count, not a count of
+unique matrix-element evaluations.
 
 The NF cross section is one internally consistent result: the NF grid agrees
 with the exact partonic convolution 13761.97 pb at 0.03%. It is not a

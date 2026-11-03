@@ -990,7 +990,10 @@ convolution at 0.03%.
   applies `|eta_j|<2.5`, so a correct NF should be below the no-rapidity
   value; it is above it. The hypothesis that the discrepancy is strictly the
   missing lab-frame boost is not confirmed; about 60% of the 4618 pb gap is
-  accounted for, leaving a residual ~15% normalization difference.
+  accounted for, leaving a residual ~15% normalization difference. There is
+  no validated NF no-eta total: the cut-removal test was only a low `gu_zu`
+  smoke (final ESS 0.0029, uncut integrand divergent), and removing all cuts
+  has no finite LO cross section.
 - **Native LHAPDF attempt (2026-11-02).** Rebuilding the local Windows
   `z_1jet_noeta` `Source/PDF` with LHAPDF 6.5.6 was recognized by MadEvent,
   but the generated Fortran executable aborted at runtime with

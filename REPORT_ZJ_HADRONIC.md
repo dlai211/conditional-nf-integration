@@ -242,6 +242,13 @@ with the high-statistics value. The `refine` step failed on this Windows build
 with `max_process not define`; the survey central value is stable between the
 two survey sizes.
 
+There is **no validated NF no-rapidity total**. The only cut-removal test was
+a low-range `gu_zu` smoke: removing both `p_T,j` and `|eta_j|` cuts collapses
+the final ESS to 0.0029 (versus 0.865 with cuts) because the uncut
+`g u > z u` integrand is collinearly divergent. A no-eta NF would need a
+retrained/regulated target; it is not the same as the native no-eta run.
+Removing all cuts has no finite LO cross section.
+
 Removing the rapidity cut increases the native result by 2768 pb (30.2%),
 but the NF is still **1850 pb (15.5%) above the no-rapidity native result**.
 The NF applies `|eta_j| < 2.5`, so a correct NF should be **below** the
@@ -416,7 +423,7 @@ normalization discrepancy.
 | row | count | what it counts |
 |---|---:|---|
 | MadGraph native | 1,360,036 | VEGAS phase-space points used for the direct `p p > z j` integration; each point evaluates the matrix element and PDFs |
-| NF training | 3,838,650,240 | matrix-element evaluations used to fit the 12 flows: cache builds, KL steps, chi-square steps, final ESS; **not** independent integration samples |
+| NF training | 3,838,650,240 | training sample budget: cache builds, cached KL batches, cached chi-square batches, final ESS; **not** all unique matrix-element calls and **not** independent integration samples |
 | NF generation | 72,000,000 | 6 channels × (60 low + 60 high) grid points × 100,000 conditional-NF samples per point; the hadronic integral is assembled by quadrature from these 720 point estimates |
 
 The training count is built from the per-model budget:
@@ -428,6 +435,12 @@ The training count is built from the per-model budget:
 + 100,000 final ESS
 ```
 
+The 10 is the number of `WEIGHTED CACHE:` records in each server log. The
+benchmark uses 131,072 as the representative balanced cache size
+(256 conditions × 512 points); it does not parse each cache's actual
+`conditions`/`points-per-condition` lines, so the total is a budget estimate,
+not an exact unique-evaluation count.
+
 For example, low `gu_zu` has 3,600 chi-square steps:
 
 ```text
@@ -435,8 +448,11 @@ For example, low `gu_zu` has 3,600 chi-square steps:
 = 324,393,120 evaluations
 ```
 
-The 12-model sum is 3,838,650,240. These evaluations train the proposal; they
-do not enter the final integral's error formula.
+The 12-model sum is 3,838,650,240. The cache builds are actual target
+evaluations; the KL and chi-square “batches” are drawn from weighted caches
+and reuse points, so the 3.84B figure is a training **work/budget** count, not
+3.84B unique matrix-element calls. None of it enters the final integral's
+error formula; that error comes from the 72M generation samples.
 
 The generation count is **not** 72M independent samples of the hadronic
 integral. It is 720 separate conditional estimates, each with 100,000
